@@ -1,0 +1,1 @@
+"""Sparse retriever module placeholder."""

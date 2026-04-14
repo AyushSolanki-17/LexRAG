@@ -1,0 +1,1 @@
+"""Faithfulness gate module placeholder."""
