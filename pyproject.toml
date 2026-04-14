@@ -1,6 +1,58 @@
 [project]
 name = "lexrag"
 version = "0.1.0"
-description = "Add your description here"
-requires-python = ">=3.14"
-dependencies = []
+description = "LexRAG phased build"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic==2.13.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy==1.20.1",
+  "pre-commit==4.5.1",
+  "pytest==9.0.3",
+  "ruff==0.15.10",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+  "E",
+  "F",
+  "I",
+  "B",
+  "C4",
+  "PIE",
+  "RET",
+  "RUF",
+  "SIM",
+  "T20",
+  "UP",
+]
+ignore = [
+  "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"eval/run_eval.py" = ["T201"]
+"tests/**/*.py" = ["T201"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+ignore_missing_imports = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_unreachable = true
+pretty = true
+show_error_codes = true
