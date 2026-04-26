@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from lexrag.ingestion.file_ingestion.schemas.file_ingestion_config import FileIngestionConfig
+from lexrag.ingestion.file_ingestion.schemas.file_ingestion_config import (
+    FileIngestionConfig,
+)
 
 HTML_MARKERS = (b"<html", b"<!doctype html", b"<body", b"<head")
 XML_MARKERS = (b"<?xml",)
