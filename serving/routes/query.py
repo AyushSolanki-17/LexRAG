@@ -1,1 +1,0 @@
-"""Query route placeholder."""

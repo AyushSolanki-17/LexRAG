@@ -1,1 +1,0 @@
-"""Citation formatter module placeholder."""

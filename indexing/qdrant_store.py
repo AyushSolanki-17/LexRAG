@@ -1,1 +1,0 @@
-"""Qdrant store module placeholder."""
