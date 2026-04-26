@@ -35,9 +35,13 @@ class SemanticChunker(BaseChunker):
 
     def chunk(self, blocks: list[ParsedBlock]) -> list[Chunk]:
         """Runs planner -> builder -> factory -> post-processor."""
-        plans = self.planner.plan(blocks)
+        prepared_blocks = self._prepare_blocks(blocks=blocks)
+        plans = self.planner.plan(prepared_blocks)
         if not plans:
             return []
         raw_chunks = self.builder.build(plans)
-        built = self.chunk_model_factory.build_chunks(raw_chunks, parsed_blocks=blocks)
+        built = self.chunk_model_factory.build_chunks(
+            raw_chunks,
+            parsed_blocks=prepared_blocks,
+        )
         return self.chunk_post_processor.process(built)

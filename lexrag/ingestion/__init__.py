@@ -10,6 +10,8 @@ from typing import Any
 
 __all__ = [
     "BGEEmbedder",
+    "BlockDeduplicator",
+    "BlockQualityValidator",
     "Chunker",
     "Deduplicator",
     "EmbeddingMode",
@@ -31,13 +33,26 @@ def __getattr__(name: str) -> Any:
             "FixedSizeChunker": FixedSizeChunker,
             "SemanticChunker": SemanticChunker,
         }[name]
-    if name in {"Deduplicator", "MinHashDeduplicator"}:
-        from lexrag.ingestion.deduplicator import Deduplicator, MinHashDeduplicator
+    if name in {
+        "BlockDeduplicator",
+        "Deduplicator",
+        "MinHashDeduplicator",
+    }:
+        from lexrag.ingestion.deduplicator import (
+            BlockDeduplicator,
+            Deduplicator,
+            MinHashDeduplicator,
+        )
 
         return {
+            "BlockDeduplicator": BlockDeduplicator,
             "Deduplicator": Deduplicator,
             "MinHashDeduplicator": MinHashDeduplicator,
         }[name]
+    if name == "BlockQualityValidator":
+        from lexrag.ingestion.block_quality import BlockQualityValidator
+
+        return BlockQualityValidator
     if name in {"BGEEmbedder", "EmbeddingMode", "build_embedder"}:
         from lexrag.ingestion.embedder import BGEEmbedder, EmbeddingMode, build_embedder
 

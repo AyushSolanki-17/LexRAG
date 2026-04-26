@@ -24,11 +24,15 @@ class FixedSizeChunker(BaseChunker):
 
     def chunk(self, blocks: list[ParsedBlock]) -> list[Chunk]:
         """Builds fixed-window chunks from parsed blocks."""
-        token_stream = self._token_stream(blocks=blocks)
+        prepared_blocks = self._prepare_blocks(blocks=blocks)
+        token_stream = self._token_stream(blocks=prepared_blocks)
         if not token_stream:
             return []
         raw_chunks = self._raw_chunks(token_stream=token_stream)
-        built = self.chunk_model_factory.build_chunks(raw_chunks, parsed_blocks=blocks)
+        built = self.chunk_model_factory.build_chunks(
+            raw_chunks,
+            parsed_blocks=prepared_blocks,
+        )
         return self.chunk_post_processor.process(built)
 
     def _token_stream(self, *, blocks: list[ParsedBlock]) -> list[TokenContext]:

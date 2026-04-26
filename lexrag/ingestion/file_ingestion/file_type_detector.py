@@ -11,8 +11,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from lexrag.ingestion.file_ingestion.magic_bytes_sniffer import MagicBytesSniffer
-from lexrag.ingestion.file_ingestion.schemas.file_ingestion_config import FileIngestionConfig
-from lexrag.ingestion.file_ingestion.schemas.file_type_detection import FileTypeDetection
+from lexrag.ingestion.file_ingestion.schemas.file_ingestion_config import (
+    FileIngestionConfig,
+)
+from lexrag.ingestion.file_ingestion.schemas.file_type_detection import (
+    FileTypeDetection,
+)
 
 HTML_MARKERS = (b"<html", b"<!doctype html", b"<body", b"<head")
 
