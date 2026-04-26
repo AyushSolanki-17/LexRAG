@@ -10,9 +10,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from lexrag.ingestion.file_ingestion.schemas.antivirus_scan_result import (
-    AntivirusScanResult,
-)
+from lexrag.ingestion.file_ingestion.schemas.antivirus_scan_result import AntivirusScanResult
 
 
 class AntivirusScanner(ABC):

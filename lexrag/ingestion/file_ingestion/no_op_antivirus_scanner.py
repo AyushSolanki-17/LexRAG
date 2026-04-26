@@ -10,9 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from lexrag.ingestion.file_ingestion.antivirus_scanner import AntivirusScanner
-from lexrag.ingestion.file_ingestion.schemas.antivirus_scan_result import (
-    AntivirusScanResult,
-)
+from lexrag.ingestion.file_ingestion.schemas.antivirus_scan_result import AntivirusScanResult
 
 
 class NoOpAntivirusScanner(AntivirusScanner):

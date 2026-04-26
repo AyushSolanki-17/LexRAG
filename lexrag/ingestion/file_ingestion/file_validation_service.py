@@ -14,18 +14,10 @@ from lexrag.ingestion.file_ingestion.antivirus_scanner import AntivirusScanner
 from lexrag.ingestion.file_ingestion.file_hash_calculator import FileHashCalculator
 from lexrag.ingestion.file_ingestion.magic_bytes_sniffer import MagicBytesSniffer
 from lexrag.ingestion.file_ingestion.no_op_antivirus_scanner import NoOpAntivirusScanner
-from lexrag.ingestion.file_ingestion.schemas.antivirus_scan_result import (
-    AntivirusScanResult,
-)
-from lexrag.ingestion.file_ingestion.schemas.file_ingestion_config import (
-    FileIngestionConfig,
-)
-from lexrag.ingestion.file_ingestion.schemas.file_validation_issue import (
-    FileValidationIssue,
-)
-from lexrag.ingestion.file_ingestion.schemas.file_validation_result import (
-    FileValidationResult,
-)
+from lexrag.ingestion.file_ingestion.schemas.antivirus_scan_result import AntivirusScanResult
+from lexrag.ingestion.file_ingestion.schemas.file_ingestion_config import FileIngestionConfig
+from lexrag.ingestion.file_ingestion.schemas.file_validation_issue import FileValidationIssue
+from lexrag.ingestion.file_ingestion.schemas.file_validation_result import FileValidationResult
 
 
 class FileValidationService:

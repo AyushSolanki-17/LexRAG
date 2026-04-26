@@ -10,15 +10,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from lexrag.ingestion.file_ingestion.file_type_detector import FileTypeDetector
-from lexrag.ingestion.file_ingestion.file_validation_service import (
-    FileValidationService,
-)
-from lexrag.ingestion.file_ingestion.schemas.file_ingestion_config import (
-    FileIngestionConfig,
-)
-from lexrag.ingestion.file_ingestion.schemas.file_ingestion_report import (
-    FileIngestionReport,
-)
+from lexrag.ingestion.file_ingestion.file_validation_service import FileValidationService
+from lexrag.ingestion.file_ingestion.schemas.file_ingestion_config import FileIngestionConfig
+from lexrag.ingestion.file_ingestion.schemas.file_ingestion_report import FileIngestionReport
 
 
 class FileIngestionGateway:
