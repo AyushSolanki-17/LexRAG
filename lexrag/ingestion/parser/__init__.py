@@ -1,33 +1,76 @@
-"""Parser package public exports.
+"""Production-grade document parsing package.
 
-This package provides a comprehensive document parsing system for the LexRAG
-project. It includes multiple parser implementations with fallback strategies
-to handle various document formats including PDF, HTML, and more.
+This package implements the parsing stages described in
+``docs/architecture.md``:
 
-Key components:
-    - BaseDocumentParser: Abstract base class for all parsers
-    - DoclingParser: Primary parser using the Docling library
-    - PyMuPDFParser: Fallback parser for PDF and HTML files
-    - FallbackDocumentParser: Orchestrator with primary/fallback logic
-    - ParsedPage: Data model for parsed content
-    - parse_document: Convenience function for common use cases
+1. File validation
+2. File type detection
+3. Parser selection
+4. Deterministic fallback execution
+5. Provenance annotation
 
-The package is designed to be robust, with multiple fallback strategies to
-ensure maximum document parsing coverage while maintaining high quality
-results.
+The public surface stays small on purpose. Most callers only need
+``FallbackDocumentParser`` and ``ParsedBlock``.
 """
 
-from .parsed_block import ParsedBlock
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
 from .base_document_parser import BaseDocumentParser
 from .docling_parser import DoclingParser
+from .document_parser import FallbackDocumentParser
+from .manual_recovery_required_error import ManualRecoveryRequiredError
 from .pymupdf_parser import PyMuPDFParser
-from .fallback_document_parser import FallbackDocumentParser
+from .schemas import (
+    DocumentParseResult,
+    ParseAttempt,
+    ParsedBlock,
+    ParsedPage,
+    ParserConfig,
+    ParserSelection,
+)
+from .unstructured_parser import UnstructuredParser
+
+
+def parse_document(path: str | Path) -> list[dict[str, Any]]:
+    """Parse a document and return the legacy dictionary payload shape.
+
+    Args:
+        path: Path to the document to parse.
+
+    Returns:
+        A list of dictionaries kept for legacy callers that have not yet
+        migrated to ``ParsedBlock``.
+    """
+    parser = FallbackDocumentParser()
+    blocks = parser.parse_document(path)
+    return [_block_to_legacy_dict(block) for block in blocks]
+
+
+def _block_to_legacy_dict(block: ParsedBlock) -> dict[str, Any]:
+    """Convert a parsed block into the historic dictionary contract."""
+    return {
+        "page": block.page,
+        "section": block.section,
+        "text": block.text,
+        "metadata": dict(block.metadata),
+    }
 
 
 __all__ = [
     "BaseDocumentParser",
     "DoclingParser",
+    "DocumentParseResult",
     "FallbackDocumentParser",
-    "PyMuPDFParser",
+    "ManualRecoveryRequiredError",
+    "ParseAttempt",
     "ParsedBlock",
+    "ParsedPage",
+    "ParserConfig",
+    "ParserSelection",
+    "PyMuPDFParser",
+    "UnstructuredParser",
+    "parse_document",
 ]

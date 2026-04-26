@@ -1,151 +1,135 @@
-"""PyMuPDF and plain-text fallback parser implementation.
+"""PyMuPDF-backed fallback parser.
 
-This module provides the PyMuPDFParser class which serves as a fallback
-document parser using PyMuPDF (fitz) for PDF processing and basic HTML
-parsing. It includes multiple fallback strategies to ensure maximum
-document parsing coverage.
+This backend focuses on reliability. It can parse real PDFs, extract HTML text,
+and recover plain-text fixture files that intentionally wear a ``.pdf``
+extension in tests and guardrail pipelines.
 """
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
+from typing import Any
 
 from lexrag.ingestion.parser.base_document_parser import BaseDocumentParser
-from lexrag.ingestion.parser.html_text_extractor import TextExtractor
-from lexrag.ingestion.parser.parsed_page import ParsedPage
+from lexrag.ingestion.parser.html_text_extractor import HtmlTextExtractor
+from lexrag.ingestion.parser.schemas.parsed_block import ParsedBlock
 
 
 class PyMuPDFParser(BaseDocumentParser):
-    """Fallback parser using PyMuPDF with a text-based safety net.
-    
-    This parser serves as a reliable fallback option for document parsing,
-    specializing in PDF and HTML files. It uses PyMuPDF (fitz) for PDF
-    processing when available, with multiple fallback strategies including
-    plain text extraction and HTML parsing.
-    
-    The parser is designed to handle edge cases and provide robust parsing
-    even when specialized libraries are unavailable or documents have
-    formatting issues.
-    
-    Supported formats:
-        - PDF files (.pdf) using PyMuPDF or plain text fallback
-        - HTML files (.html, .htm) using built-in HTML text extraction
-    """
+    """Fallback parser for PDF, HTML, and text-like recovery paths."""
 
-    def parse(self, path: Path) -> list[ParsedPage]:
-        """Parses PDF/HTML files using fallback logic.
-        
-        This method determines the appropriate parsing strategy based on the
-        file extension and delegates to specialized parsing methods.
-        
+    def parse(self, path: Path) -> list[ParsedBlock]:
+        """Parse a supported document into canonical parsed blocks.
+
         Args:
-            path: The file system path to the document to parse.
-                
+            path: Document path to parse.
+
         Returns:
-            A list of ParsedPage objects representing the parsed document.
-            
-        Raises:
-            RuntimeError: If the file format is not supported by this parser.
-                Supported formats are PDF (.pdf) and HTML (.html, .htm).
+            Canonical parsed blocks extracted from the document.
         """
         suffix = path.suffix.lower()
         if suffix in {".html", ".htm"}:
-            return self._parse_html(path)
-        if suffix == ".pdf":
-            return self._parse_pdf(path)
-        raise RuntimeError(f"Unsupported document type for fallback parser: {path}")
+            return self._parse_html(path=path)
+        if self._looks_like_pdf(path=path):
+            return self._parse_pdf(path=path)
+        return self._parse_text_recovery(path=path)
 
-    def _parse_html(self, path: Path) -> list[ParsedPage]:
-        """Parses HTML files using the built-in TextExtractor.
-        
-        This method reads HTML content and extracts plain text using the
-        lightweight TextExtractor class, which avoids external dependencies.
-        
-        Args:
-            path: The file system path to the HTML file.
-            
-        Returns:
-            A list containing a single ParsedPage with the extracted text.
-            
-        Raises:
-            RuntimeError: If the HTML file is empty or no text can be extracted.
-        """
+    def _parse_html(self, *, path: Path) -> list[ParsedBlock]:
+        """Extract visible text from HTML content."""
         raw = path.read_text(encoding="utf-8", errors="ignore")
-        extractor = TextExtractor()
+        extractor = HtmlTextExtractor()
         extractor.feed(raw)
         text = extractor.text()
         if not text:
             raise RuntimeError(f"Empty HTML content parsed for {path}")
-        return [ParsedPage(page=1, section="HTML", text=text)]
+        return [self._build_block(path=path, page=1, section="HTML", text=text)]
 
-    def _parse_pdf(self, path: Path) -> list[ParsedPage]:
-        """Parses PDF files using PyMuPDF or text fallback.
-        
-        This method attempts to use PyMuPDF (fitz) for PDF parsing if available.
-        If PyMuPDF is not installed, it falls back to plain text extraction.
-        
-        Args:
-            path: The file system path to the PDF file.
-            
-        Returns:
-            A list of ParsedPage objects representing the PDF content.
-        """
+    def _looks_like_pdf(self, *, path: Path) -> bool:
+        """Detect real PDFs by header instead of trusting the extension."""
+        try:
+            header = path.read_bytes()[:8]
+        except OSError:
+            return False
+        return header.startswith(b"%PDF")
+
+    def _parse_pdf(self, *, path: Path) -> list[ParsedBlock]:
+        """Extract page text from a real PDF using PyMuPDF."""
         try:
             import fitz
-        except Exception:
-            return self._parse_pdf_text_fallback(path)
-        return self._extract_pdf_pages(path, fitz)
+        except Exception as exc:  # pragma: no cover
+            raise RuntimeError("PyMuPDF is required for PDF fallback parsing") from exc
+        return self._extract_pdf_pages(path=path, fitz_module=fitz)
 
-    def _extract_pdf_pages(self, path: Path, fitz) -> list[ParsedPage]:
-        """Extracts text content from PDF pages using PyMuPDF.
-        
-        This method opens the PDF using PyMuPDF and extracts text from each
-        page. Pages with no extractable text are skipped.
-        
-        Args:
-            path: The file system path to the PDF file.
-            fitz: The PyMuPDF module (passed to avoid repeated imports).
-            
-        Returns:
-            A list of ParsedPage objects, each containing text from one PDF page.
-            
-        Raises:
-            RuntimeError: If no text can be extracted from any page in the PDF.
-        """
-        doc = fitz.open(path)  # pragma: no cover - requires fitz runtime
-        pages: list[ParsedPage] = []
-        for idx, page in enumerate(doc, start=1):
-            text = page.get_text("text").strip()
-            if text:
-                pages.append(ParsedPage(page=idx, section=f"Page {idx}", text=text))
-        if not pages:
-            raise RuntimeError(f"No extractable text found in PDF {path}")
-        return pages
+    def _extract_pdf_pages(self, *, path: Path, fitz_module: Any) -> list[ParsedBlock]:
+        """Emit one parsed block per text-bearing page."""
+        blocks: list[ParsedBlock] = []
+        with fitz_module.open(path) as document:  # pragma: no cover
+            for page_index, page in enumerate(document, start=1):
+                text = page.get_text("text").strip()
+                if not text:
+                    continue
+                blocks.append(
+                    self._build_block(
+                        path=path,
+                        page=page_index,
+                        section=f"Page {page_index}",
+                        text=text,
+                    )
+                )
+        if blocks:
+            return blocks
+        raise RuntimeError(f"No extractable text found in PDF {path}")
 
-    def _parse_pdf_text_fallback(self, path: Path) -> list[ParsedPage]:
-        """Parses PDF files using plain text extraction as a last resort.
-        
-        This method reads the PDF file as plain text and attempts to extract
-        content. It splits on form feed characters (\f) to identify page
-        boundaries. This is a fallback method used when PyMuPDF is not
-        available or fails to parse the PDF.
-        
-        Args:
-            path: The file system path to the PDF file.
-            
-        Returns:
-            A list of ParsedPage objects created from the extracted text.
-            
-        Raises:
-            RuntimeError: If the PDF file is empty or no text can be extracted.
+    def _parse_text_recovery(self, *, path: Path) -> list[ParsedBlock]:
+        """Recover text-like files that could not be parsed as binary PDFs.
+
+        This branch exists for robustness. Some upstream systems rename text
+        exports to ``.pdf`` even when they are not real PDFs, and our tests
+        intentionally cover that failure mode.
         """
-        raw = path.read_text(encoding="utf-8", errors="ignore").strip()
-        if not raw:
-            raise RuntimeError(f"Unable to parse empty PDF fallback text for {path}")
-        parts = [part.strip() for part in raw.split("\f") if part.strip()]
-        if not parts:
-            parts = [raw]
+        content = path.read_text(encoding="utf-8", errors="ignore").strip()
+        if not content:
+            raise RuntimeError(
+                f"No extractable text found in fallback recovery for {path}"
+            )
+        parts = [part.strip() for part in content.split("\f") if part.strip()]
         return [
-            ParsedPage(page=idx, section=f"Page {idx}", text=text)
-            for idx, text in enumerate(parts, start=1)
+            self._build_block(
+                path=path,
+                page=index,
+                section=f"Page {index}",
+                text=text,
+            )
+            for index, text in enumerate(parts or [content], start=1)
         ]
+
+    def _build_block(
+        self,
+        *,
+        path: Path,
+        page: int,
+        section: str,
+        text: str,
+    ) -> ParsedBlock:
+        """Build a canonical parsed block for this backend."""
+        return ParsedBlock(
+            doc_id=path.stem,
+            source_path=str(path),
+            source_name=path.name,
+            doc_type=path.suffix.lower().lstrip(".") or None,
+            block_id=self._build_block_id(path=path, page=page, order=1, text=text),
+            page=page,
+            section=section,
+            block_type="paragraph",
+            text=text,
+            markdown=text,
+            order_in_page=1,
+            parser_used=self.parser_name,
+            metadata={"parser": self.parser_name, "extraction_mode": "text"},
+        )
+
+    def _build_block_id(self, *, path: Path, page: int, order: int, text: str) -> str:
+        """Build deterministic block identifiers."""
+        digest = hashlib.sha1(text[:500].encode("utf-8")).hexdigest()[:12]
+        return f"{path.stem}_p{page}_b{order}_{digest}"
