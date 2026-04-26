@@ -13,16 +13,16 @@ from dataclasses import dataclass
 @dataclass(slots=True)
 class SemanticChunkBuffer:
     """In-progress semantic chunk accumulation state.
-    
+
     This dataclass represents the mutable state of a chunk being
     constructed during semantic chunking. It accumulates sentences,
     tracks token count, and maintains context information for
     intelligent boundary detection.
-    
+
     The buffer is used by the semantic chunker to temporarily
     accumulate content until a chunk boundary is detected based
     on semantic similarity or size constraints.
-    
+
     Attributes:
         sentences: List of accumulated sentences for the current chunk.
         token_count: Total number of tokens in the accumulated sentences.

@@ -1,49 +1,60 @@
-"""Chunker package public exports.
+"""Public chunker package exports with lazy loading.
 
-This package provides a comprehensive document chunking system for the LexRAG
-project. It includes multiple chunking strategies, semantic analysis,
-tokenization utilities, and metadata management to convert parsed documents
-into optimized retrieval chunks.
+The chunker package now has explicit internal boundaries:
 
-Key components:
-    - BaseChunker: Abstract base class for all chunker implementations
-    - FixedSizeChunker: Deterministic fixed-token window chunking
-    - SemanticChunker: Content-aware semantic chunking
-    - ChunkModelFactory: Factory for creating validated Chunk objects
-    - SimilarityEngine: Vector similarity calculations
-    - TokenizationEngine: Token counting and text normalization
-    - Chunk: Primary data model for retrieval units
-    - ChunkMetadata: Comprehensive metadata for traceability
-
-The package supports both deterministic and semantic chunking strategies,
-with extensive metadata preservation for retrieval quality and observability.
+- `schemas/` holds Pydantic contracts shared across layers.
+- planners/builders/factories implement the chunking workflow.
+- compatibility shims preserve older import paths during migration.
 """
 
-from .chunker import (
-    BaseChunker,
-    Chunker,
-    ChunkModelFactory,
-    SimilarityEngine,
-    TokenizationEngine,
-)
-from .fixed_size_chunker import FixedSizeChunker
-from .semantic_chunker import SemanticChunker
-from .chunk import Chunk
-from .chunk_metadata import ChunkMetadata
+from __future__ import annotations
 
-import re
-
-SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[.!?])\s+")
-
+from importlib import import_module
+from typing import Any
 
 __all__ = [
     "BaseChunker",
-    "ChunkModelFactory",
-    "Chunker",
-    "FixedSizeChunker",
-    "SemanticChunker",
-    "SimilarityEngine",
-    "TokenizationEngine",
     "Chunk",
     "ChunkMetadata",
+    "ChunkModelFactory",
+    "Chunker",
+    "ChunkingConfig",
+    "FixedSizeChunker",
+    "PlannedChunkUnit",
+    "RawChunkPayload",
+    "SemanticChunker",
+    "SimilarityEngine",
+    "TokenContext",
+    "TokenizationEngine",
 ]
+
+_EXPORTS: dict[str, tuple[str, str]] = {
+    "BaseChunker": (".base_chunker", "BaseChunker"),
+    "Chunk": (".chunk", "Chunk"),
+    "ChunkMetadata": (".chunk_metadata", "ChunkMetadata"),
+    "ChunkingConfig": (".schemas.chunking_config", "ChunkingConfig"),
+    "Chunker": (".chunker", "Chunker"),
+    "ChunkModelFactory": (".chunk_model_factory", "ChunkModelFactory"),
+    "FixedSizeChunker": (".fixed_size_chunker", "FixedSizeChunker"),
+    "PlannedChunkUnit": (".planned_chunk_unit", "PlannedChunkUnit"),
+    "RawChunkPayload": (".raw_chunk_payload", "RawChunkPayload"),
+    "SemanticChunker": (".semantic_chunker", "SemanticChunker"),
+    "SimilarityEngine": (".chunk_similarity_engine", "SimilarityEngine"),
+    "TokenContext": (".token_context", "TokenContext"),
+    "TokenizationEngine": (".tokenization_engine", "TokenizationEngine"),
+}
+
+
+def _load_export(*, module_path: str, symbol: str) -> Any:
+    """Import one symbol lazily from its module path."""
+    module = import_module(module_path, package=__name__)
+    return getattr(module, symbol)
+
+
+def __getattr__(name: str) -> Any:
+    """Resolve chunker exports lazily to break circular import chains."""
+    export = _EXPORTS.get(name)
+    if export is not None:
+        module_path, symbol = export
+        return _load_export(module_path=module_path, symbol=symbol)
+    raise AttributeError(f"module 'lexrag.ingestion.chunker' has no attribute {name!r}")

@@ -1,129 +1,83 @@
-"""Block-aware semantic planner for intelligent chunking.
-
-This module provides the BlockAwareSemanticPlanner class which analyzes
-ParsedBlock objects and creates chunking plans that respect document
-structure and content boundaries.
-"""
+"""Planning pass that annotates blocks before chunk construction."""
 
 from __future__ import annotations
 
-from typing import Any
-
-from lexrag.ingestion.parser import ParsedBlock
+from lexrag.ingestion.chunker.schemas.chunking_config import ChunkingConfig
+from lexrag.ingestion.chunker.schemas.planned_chunk import PlannedChunk
+from lexrag.ingestion.chunker.tokenization_engine import TokenizationEngine
+from lexrag.ingestion.parser.parsed_block import ParsedBlock
 
 
 class BlockAwareSemanticPlanner:
-    """Planner for block-aware semantic chunking strategies.
-    
-    This class analyzes ParsedBlock objects and creates chunking plans
-    that respect document structure, content boundaries, and quality
-    indicators. It determines which blocks should be preserved as
-    standalone chunks and which can be merged based on content type
-    and structural boundaries.
-    
-    Key responsibilities:
-        - Preserve standalone blocks (tables, code, headings, captions)
-        - Allow mergeable blocks (paragraphs, lists) for semantic grouping
-        - Detect section boundaries for intelligent splitting
-        - Handle heading anchoring for content hierarchy
-        - Apply OCR-sensitive boundaries for quality control
-    
-    Attributes:
-        FORCE_STANDALONE_BLOCKS: Set of block types that must be preserved
-            as standalone chunks regardless of similarity analysis.
+    """Assigns chunking strategy and boundary signals per normalized block.
+
+    This class implements the architecture's planning layer. It does not merge
+    text or create chunks; it only decides how each block should be treated so
+    the builder can remain predictable and free of parsing heuristics.
     """
 
-    FORCE_STANDALONE_BLOCKS = {
-        "table",
-        "code",
-        "heading",
-        "image_caption",
-    }
-    
-    # Block types that should never be merged with other content:
-    # - table: Tabular data loses meaning when split
-    # - code: Code snippets require context preservation
-    # - heading: Structural elements define hierarchy
-    # - image_caption: Captions must stay with their images
-
-    def plan(
+    def __init__(
         self,
-        blocks: list[ParsedBlock],
-    ) -> list[dict[str, Any]]:
-        """Converts ParsedBlock objects into planned chunking units.
-        
-        This method processes ParsedBlock objects and creates planning units
-        that contain metadata for the chunking pipeline. Each unit includes
-        information about whether it should be standalone, boundary detection,
-        and content analysis.
-        
-        Args:
-            blocks: List of ParsedBlock objects to analyze and plan.
-                
-        Returns:
-            List of planning unit dictionaries containing:
-            - block: Original ParsedBlock object
-            - text: Cleaned text content
-            - page: Page number where content originates
-            - section: Section title or description
-            - block_type: Type of content (table, code, paragraph, etc.)
-            - tokens: Estimated token count
-            - force_standalone: Whether block must be standalone
-            - is_boundary: Whether block represents a hard boundary
-            
-            Empty blocks are filtered out automatically.
-        """
+        *,
+        config: ChunkingConfig | None = None,
+        tokenization_engine: TokenizationEngine | None = None,
+    ) -> None:
+        self.config = config or ChunkingConfig()
+        self.tokenization_engine = tokenization_engine or TokenizationEngine()
 
-        planned_units: list[dict[str, Any]] = []
-
+    def plan(self, blocks: list[ParsedBlock]) -> list[PlannedChunk]:
+        """Builds planner records while dropping blank, non-indexable blocks."""
+        plans: list[PlannedChunk] = []
         for block in blocks:
-            if not block.text.strip():
+            text = block.text.strip()
+            if not text:
                 continue
+            plans.append(self._plan_block(block=block, text=text))
+        return plans
 
-            planned_units.append(
-                {
-                    "block": block,
-                    "text": block.text.strip(),
-                    "page": block.page,
-                    "section": block.section,
-                    "block_type": block.block_type,
-                    "tokens": len(block.text.split()),
-                    "force_standalone": (
-                        block.block_type in self.FORCE_STANDALONE_BLOCKS
-                    ),
-                    "is_boundary": self._is_boundary(block),
-                }
-            )
+    def _plan_block(self, *, block: ParsedBlock, text: str) -> PlannedChunk:
+        """Builds one planning record from one parsed block."""
+        token_count = self.tokenization_engine.count_tokens(text)
+        strategy = self._strategy_for(block=block, token_count=token_count)
+        return PlannedChunk(
+            block=block,
+            text=text,
+            token_count=token_count,
+            chunking_strategy=strategy,
+            standalone=strategy in {"standalone", "table_aware"},
+            merge_with_next=strategy not in {"standalone", "table_aware"},
+            overlap_candidate=strategy in {"semantic_merge", "sliding_window"},
+            section_boundary=self._is_section_boundary(block=block, strategy=strategy),
+            heading_anchor=self._heading_anchor(block=block),
+        )
 
-        return planned_units
-
-    def _is_boundary(self, block: ParsedBlock) -> bool:
-        """Determines if a block represents a hard splitting boundary.
-        
-        This method identifies blocks that should trigger chunk boundaries
-        regardless of semantic similarity. These boundaries help maintain
-        content coherence and structural integrity.
-        
-        Args:
-            block: ParsedBlock to analyze for boundary characteristics.
-            
-        Returns:
-            True if the block should trigger a hard boundary,
-            False if content can be merged across this block.
-            
-        Boundary criteria:
-            - Heading blocks always create boundaries
-            - Blocks with explicit heading levels create boundaries
-            - Low-confidence OCR blocks create boundaries for quality control
-        """
-
+    def _strategy_for(self, *, block: ParsedBlock, token_count: int) -> str:
+        """Chooses the chunking strategy that best fits the block shape."""
         if block.block_type == "heading":
-            return True
+            return "heading_anchored"
+        if block.block_type == "table":
+            return "table_aware"
+        if block.block_type in {"code", "definition", "caption"}:
+            return "standalone"
+        if token_count > self.config.max_chunk_tokens:
+            return "sliding_window"
+        return "semantic_merge"
 
+    def _is_section_boundary(self, *, block: ParsedBlock, strategy: str) -> bool:
+        """Detects boundaries that should flush the current semantic buffer."""
+        if strategy == "heading_anchored":
+            return True
         if block.heading_level is not None:
             return True
+        return bool(block.is_ocr and (block.confidence or 1.0) < 0.50)
 
-        if block.is_ocr and (block.confidence or 1.0) < 0.50:
-            return True
-
-        return False
+    def _heading_anchor(self, *, block: ParsedBlock) -> str | None:
+        """Resolves stable heading context for downstream chunk lineage."""
+        anchor = block.metadata.get("heading_anchor")
+        if isinstance(anchor, str) and anchor.strip():
+            return anchor.strip()
+        if block.block_type == "heading" and block.text.strip():
+            return block.text.strip()
+        if block.section.strip():
+            return block.section.strip()
+        return None
