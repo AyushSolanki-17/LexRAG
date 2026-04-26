@@ -1,9 +1,12 @@
-"""Ingestion package public exports."""
+"""Lightweight ingestion package exports.
 
-from lexrag.ingestion.chunker import Chunker, FixedSizeChunker, SemanticChunker
-from lexrag.ingestion.deduplicator import Deduplicator, MinHashDeduplicator
-from lexrag.ingestion.embedder import BGEEmbedder, EmbeddingMode, build_embedder
-from lexrag.ingestion.parser import FallbackDocumentParser
+This module intentionally avoids eager imports so parser-only paths do not
+require chunking/tokenizer dependencies at import time.
+"""
+
+from __future__ import annotations
+
+from typing import Any
 
 __all__ = [
     "BGEEmbedder",
@@ -16,3 +19,35 @@ __all__ = [
     "SemanticChunker",
     "build_embedder",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    """Resolve ingestion exports lazily to avoid hard dependency coupling."""
+    if name in {"Chunker", "FixedSizeChunker", "SemanticChunker"}:
+        from lexrag.ingestion.chunker import Chunker, FixedSizeChunker, SemanticChunker
+
+        return {
+            "Chunker": Chunker,
+            "FixedSizeChunker": FixedSizeChunker,
+            "SemanticChunker": SemanticChunker,
+        }[name]
+    if name in {"Deduplicator", "MinHashDeduplicator"}:
+        from lexrag.ingestion.deduplicator import Deduplicator, MinHashDeduplicator
+
+        return {
+            "Deduplicator": Deduplicator,
+            "MinHashDeduplicator": MinHashDeduplicator,
+        }[name]
+    if name in {"BGEEmbedder", "EmbeddingMode", "build_embedder"}:
+        from lexrag.ingestion.embedder import BGEEmbedder, EmbeddingMode, build_embedder
+
+        return {
+            "BGEEmbedder": BGEEmbedder,
+            "EmbeddingMode": EmbeddingMode,
+            "build_embedder": build_embedder,
+        }[name]
+    if name == "FallbackDocumentParser":
+        from lexrag.ingestion.parser import FallbackDocumentParser
+
+        return FallbackDocumentParser
+    raise AttributeError(f"module 'lexrag.ingestion' has no attribute {name!r}")
