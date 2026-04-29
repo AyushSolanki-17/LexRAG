@@ -14,6 +14,10 @@ class BlockAwareSemanticPlanner:
     This class implements the architecture's planning layer. It does not merge
     text or create chunks; it only decides how each block should be treated so
     the builder can remain predictable and free of parsing heuristics.
+
+    Attributes:
+        config: Shared token and quality thresholds.
+        tokenization_engine: Token counter used only for plan sizing signals.
     """
 
     def __init__(
@@ -26,7 +30,14 @@ class BlockAwareSemanticPlanner:
         self.tokenization_engine = tokenization_engine or TokenizationEngine()
 
     def plan(self, blocks: list[ParsedBlock]) -> list[PlannedChunk]:
-        """Builds planner records while dropping blank, non-indexable blocks."""
+        """Build planner records while dropping blank, non-indexable blocks.
+
+        Args:
+            blocks: Normalized parser blocks from the upstream ingestion stages.
+
+        Returns:
+            Ordered planner directives consumed by the chunk builder.
+        """
         plans: list[PlannedChunk] = []
         for block in blocks:
             text = block.text.strip()
@@ -52,13 +63,20 @@ class BlockAwareSemanticPlanner:
         )
 
     def _strategy_for(self, *, block: ParsedBlock, token_count: int) -> str:
-        """Chooses the chunking strategy that best fits the block shape."""
+        """Choose the chunking strategy that best fits the block shape.
+
+        The planner intentionally keeps this policy explicit because retrieval
+        quality issues are often traced back to silent chunking heuristics. A
+        visible strategy assignment makes those decisions auditable.
+        """
         if block.block_type == "heading":
             return "heading_anchored"
         if block.block_type == "table":
             return "table_aware"
-        if block.block_type in {"code", "definition", "caption"}:
+        if block.block_type in {"code", "code_block", "definition", "caption"}:
             return "standalone"
+        if block.block_type == "list":
+            return "heading_anchored"
         if token_count > self.config.max_chunk_tokens:
             return "sliding_window"
         return "semantic_merge"
@@ -72,7 +90,11 @@ class BlockAwareSemanticPlanner:
         return bool(block.is_ocr and (block.confidence or 1.0) < 0.50)
 
     def _heading_anchor(self, *, block: ParsedBlock) -> str | None:
-        """Resolves stable heading context for downstream chunk lineage."""
+        """Resolve stable heading context for downstream chunk lineage.
+
+        Returns:
+            A normalized anchor value when a block can provide heading context.
+        """
         anchor = block.metadata.get("heading_anchor")
         if isinstance(anchor, str) and anchor.strip():
             return anchor.strip()

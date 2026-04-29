@@ -11,7 +11,12 @@ from lexrag.ingestion.parser.parsed_block import ParsedBlock
 
 
 class ChunkBuilder:
-    """Builds raw chunk payloads according to planner intent and token budgets."""
+    """Build raw chunk payloads according to planner intent and token budgets.
+
+    The builder is intentionally deterministic. It consumes explicit planner
+    directives and never reaches back into parser-specific heuristics. That
+    separation keeps chunking behavior explainable and debuggable.
+    """
 
     def __init__(
         self,
@@ -25,7 +30,15 @@ class ChunkBuilder:
         self.similarity_engine = similarity_engine or SimilarityEngine()
 
     def build(self, plans: list[PlannedChunk]) -> list[RawChunkPayload]:
-        """Converts planner records into ordered raw chunk payloads."""
+        """Convert planner records into ordered raw chunk payloads.
+
+        Args:
+            plans: Ordered planner directives for one document.
+
+        Returns:
+            Raw payloads with lineage preserved but before canonical IDs and
+            final metadata enrichment are applied.
+        """
         raw_chunks: list[RawChunkPayload] = []
         buffer: list[PlannedChunk] = []
         current_anchor: str | None = None
@@ -50,7 +63,7 @@ class ChunkBuilder:
         raw_chunks: list[RawChunkPayload],
         current_anchor: str | None,
     ) -> str | None:
-        """Processes one planner record and returns the current heading anchor."""
+        """Process one planner record and return the current heading anchor."""
         if plan.chunking_strategy == "heading_anchored":
             self._flush_buffer(
                 buffer=buffer, raw_chunks=raw_chunks, heading_anchor=current_anchor
@@ -121,8 +134,9 @@ class ChunkBuilder:
         plans: list[PlannedChunk],
         heading_anchor: str | None,
     ) -> RawChunkPayload:
-        """Builds one semantic-merge payload from buffered plans."""
+        """Build one semantic-merge payload from buffered plans."""
         blocks = [plan.block for plan in plans]
+        chunk_type = self._chunk_type(blocks=blocks)
         text = self._compose_text(
             body_parts=[plan.text for plan in plans], heading_anchor=heading_anchor
         )
@@ -130,7 +144,7 @@ class ChunkBuilder:
             text=text,
             source_blocks=blocks,
             chunking_strategy="semantic_merge",
-            chunk_type=self._chunk_type(blocks=blocks),
+            chunk_type=chunk_type,
             token_count=sum(plan.token_count for plan in plans),
             heading_anchor=heading_anchor,
         )
@@ -141,13 +155,13 @@ class ChunkBuilder:
         plan: PlannedChunk,
         heading_anchor: str | None,
     ) -> RawChunkPayload:
-        """Builds a standalone payload for tables, code, and protected blocks."""
+        """Build a standalone payload for tables, code, and protected blocks."""
         text = self._compose_text(body_parts=[plan.text], heading_anchor=heading_anchor)
         return RawChunkPayload(
             text=text,
             source_blocks=[plan.block],
             chunking_strategy=plan.chunking_strategy,
-            chunk_type=plan.block.block_type,
+            chunk_type=self._normalized_block_type(plan.block.block_type),
             token_count=plan.token_count,
             heading_anchor=heading_anchor,
         )
@@ -158,7 +172,7 @@ class ChunkBuilder:
         plan: PlannedChunk,
         heading_anchor: str | None,
     ) -> list[RawChunkPayload]:
-        """Splits an oversized block into token windows with configured overlap."""
+        """Split an oversized block into token windows with configured overlap."""
         tokens = self.tokenization_engine.tokenize(plan.text)
         windows = self.tokenization_engine.window_tokens(
             tokens=tokens,
@@ -173,7 +187,7 @@ class ChunkBuilder:
                 ),
                 source_blocks=[plan.block],
                 chunking_strategy="sliding_window",
-                chunk_type=plan.block.block_type,
+                chunk_type=self._normalized_block_type(plan.block.block_type),
                 token_count=len(window),
                 heading_anchor=heading_anchor,
             )
@@ -203,8 +217,12 @@ class ChunkBuilder:
         return sum(plan.token_count for plan in buffer)
 
     def _chunk_type(self, *, blocks: list[ParsedBlock]) -> str:
-        """Resolves a stable chunk type from source block composition."""
-        types = {block.block_type for block in blocks if block.block_type}
+        """Resolve a stable chunk type from source block composition."""
+        types = {
+            self._normalized_block_type(block.block_type)
+            for block in blocks
+            if block.block_type
+        }
         if "table" in types:
             return "table"
         if "code" in types:
@@ -212,3 +230,11 @@ class ChunkBuilder:
         if "list" in types:
             return "list"
         return "paragraph"
+
+    def _normalized_block_type(self, block_type: str | None) -> str:
+        """Normalize parser block types to architecture-level chunk types."""
+        if block_type in {None, "", "paragraph"}:
+            return "paragraph"
+        if block_type in {"code_block", "code"}:
+            return "code"
+        return block_type or "paragraph"

@@ -8,18 +8,25 @@ from lexrag.ingestion.chunker.schemas.chunking_config import ChunkingConfig
 
 
 class ChunkPostProcessor:
-    """Validates adjacency metadata and computes chunk quality signals.
+    """Validate and enrich chunks before the embedding preparation layer.
 
-    This is the final step in the chunking package before embedding
-    preparation. It centralizes cross-chunk enrichments so builders can focus
-    on segmentation logic rather than mutating finalized models.
+    This is the last architecture-defined checkpoint before embedding text is
+    constructed. It centralizes quality scoring, overlap wiring, and metadata
+    enrichment so the builder can stay focused on segmentation concerns.
     """
 
     def __init__(self, *, config: ChunkingConfig) -> None:
         self.config = config
 
     def process(self, chunks: list[Chunk]) -> list[Chunk]:
-        """Enriches chunk metadata with adjacency links and quality scores."""
+        """Enrich chunk metadata with adjacency links and quality signals.
+
+        Args:
+            chunks: Canonical chunks for a single document.
+
+        Returns:
+            Post-processed chunks with stable adjacency and risk annotations.
+        """
         processed: list[Chunk] = []
         for index, chunk in enumerate(chunks):
             previous_chunk = chunks[index - 1] if index > 0 else None
@@ -48,7 +55,37 @@ class ChunkPostProcessor:
         payload["overlap_prev"] = previous_chunk is not None
         payload["overlap_next"] = next_chunk is not None
         payload["chunk_quality_score"] = self._quality_score(metadata=chunk.metadata)
+        payload["metadata"] = self._enriched_metadata(
+            chunk=chunk,
+            previous_chunk=previous_chunk,
+            next_chunk=next_chunk,
+            quality_score=payload["chunk_quality_score"],
+        )
         return ChunkMetadata.model_validate(payload)
+
+    def _enriched_metadata(
+        self,
+        *,
+        chunk: Chunk,
+        previous_chunk: Chunk | None,
+        next_chunk: Chunk | None,
+        quality_score: float,
+    ) -> dict[str, object]:
+        """Build extension metadata needed by downstream retrieval layers."""
+        metadata = dict(chunk.metadata.metadata)
+        metadata["quality_flags"] = self._quality_flags(
+            chunk=chunk, quality_score=quality_score
+        )
+        metadata["citation_validation"] = self._citation_validation(chunk=chunk)
+        metadata["reranker_metadata"] = self._reranker_metadata(chunk=chunk)
+        metadata["hallucination_risk"] = self._hallucination_risk(chunk=chunk)
+        metadata["overlap_validation"] = self._overlap_validation(
+            previous_chunk=previous_chunk,
+            current_chunk=chunk,
+            next_chunk=next_chunk,
+        )
+        metadata["final_normalized_text"] = self._final_normalized_text(chunk.text)
+        return metadata
 
     def _quality_score(self, *, metadata: ChunkMetadata) -> float:
         """Computes a bounded chunk quality score from architecture signals."""
@@ -76,3 +113,102 @@ class ChunkPostProcessor:
         if count > self.config.max_chunk_tokens:
             return round(self.config.max_chunk_tokens / count, 4)
         return 0.0
+
+    def _quality_flags(self, *, chunk: Chunk, quality_score: float) -> list[str]:
+        """Build quality flags that downstream systems can reason about."""
+        flags: list[str] = []
+        if quality_score < self.config.low_quality_threshold:
+            flags.append("low_quality")
+        if (
+            chunk.metadata.parse_confidence is not None
+            and chunk.metadata.parse_confidence
+            < self.config.low_confidence_parse_threshold
+        ):
+            flags.append("low_parse_confidence")
+        confidence = chunk.metadata.avg_confidence or 0.0
+        if (
+            chunk.metadata.contains_ocr
+            and confidence < self.config.low_confidence_ocr_threshold
+        ):
+            flags.append("high_ocr_risk")
+        if self._citation_validation(chunk=chunk)["out_of_bounds"]:
+            flags.append("citation_out_of_bounds")
+        return flags
+
+    def _citation_validation(self, *, chunk: Chunk) -> dict[str, object]:
+        """Inspect simple citation patterns and validate page-local references."""
+        references = self._page_references(text=chunk.text)
+        page_start = chunk.metadata.page_start
+        page_end = chunk.metadata.page_end
+        invalid = [page for page in references if page < page_start or page > page_end]
+        return {
+            "references": references,
+            "out_of_bounds": bool(invalid),
+            "invalid_references": invalid,
+        }
+
+    def _page_references(self, *, text: str) -> list[int]:
+        """Extract page references from chunk text using conservative patterns."""
+        references: list[int] = []
+        for part in text.replace(",", " ").split():
+            lowered = part.lower().strip("[]().:")
+            if lowered.startswith("p.") and lowered[2:].isdigit():
+                references.append(int(lowered[2:]))
+            if lowered.startswith("page") and lowered[4:].isdigit():
+                references.append(int(lowered[4:]))
+        return references
+
+    def _reranker_metadata(self, *, chunk: Chunk) -> dict[str, object]:
+        """Add compact metadata that rerankers and debuggers can reuse cheaply."""
+        section_path = " > ".join(chunk.metadata.section_path)
+        title = chunk.metadata.section_title or section_path or chunk.metadata.doc_id
+        return {
+            "doc_title": chunk.metadata.doc_id or "unknown_doc",
+            "section_summary": title or "Untitled Section",
+            "block_type_distribution": {
+                chunk.metadata.chunk_type: len(chunk.metadata.source_block_ids)
+            },
+        }
+
+    def _hallucination_risk(self, *, chunk: Chunk) -> dict[str, object]:
+        """Summarize chunk-level grounding risk for downstream answer logic."""
+        parse_confidence = chunk.metadata.parse_confidence
+        ocr_confidence = chunk.metadata.avg_confidence
+        high_risk = False
+        reasons: list[str] = []
+        if (
+            parse_confidence is not None
+            and parse_confidence < self.config.low_confidence_parse_threshold
+        ):
+            high_risk = True
+            reasons.append("low_parse_confidence")
+        if (
+            chunk.metadata.contains_ocr
+            and (ocr_confidence or 0.0) < self.config.low_confidence_ocr_threshold
+        ):
+            high_risk = True
+            reasons.append("low_ocr_confidence")
+        return {"high_risk": high_risk, "reasons": reasons}
+
+    def _overlap_validation(
+        self,
+        *,
+        previous_chunk: Chunk | None,
+        current_chunk: Chunk,
+        next_chunk: Chunk | None,
+    ) -> dict[str, object]:
+        """Validate adjacency references now that stable chunk IDs exist."""
+        return {
+            "previous_exists": previous_chunk is not None,
+            "next_exists": next_chunk is not None,
+            "expected_previous_chunk_id": previous_chunk.chunk_id
+            if previous_chunk
+            else None,
+            "expected_next_chunk_id": next_chunk.chunk_id if next_chunk else None,
+            "token_count": current_chunk.metadata.token_count,
+        }
+
+    def _final_normalized_text(self, text: str) -> str:
+        """Apply the last whitespace cleanup before embedding text is derived."""
+        lines = [line.rstrip() for line in text.replace("\r\n", "\n").split("\n")]
+        return "\n".join(line for line in lines if line.strip() or line == "")

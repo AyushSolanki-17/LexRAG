@@ -19,7 +19,12 @@ logger = get_logger(__name__)
 
 
 class ChunkModelFactory:
-    """Builds stable `Chunk` models with deterministic IDs and lineage metadata."""
+    """Build stable `Chunk` models with deterministic IDs and lineage metadata.
+
+    The factory is the point where builder output becomes the canonical chunk
+    contract. This layer intentionally owns ID generation and metadata shaping
+    so upstream builder logic can focus purely on segmentation.
+    """
 
     def __init__(
         self,
@@ -34,7 +39,16 @@ class ChunkModelFactory:
         *,
         parsed_blocks: list[ParsedBlock],
     ) -> list[Chunk]:
-        """Converts raw chunk payloads into canonical chunk models."""
+        """Convert raw chunk payloads into canonical chunk models.
+
+        Args:
+            raw_chunks: Builder output for one document.
+            parsed_blocks: Full normalized document block list for shared
+                document-level defaults.
+
+        Returns:
+            Canonical chunks ready for post-processing and embedding prep.
+        """
         if not raw_chunks:
             return []
         metadata_base = self._metadata_base(parsed_blocks=parsed_blocks)
@@ -87,7 +101,7 @@ class ChunkModelFactory:
         return Chunk(
             chunk_id=chunk_id,
             text=text,
-            embedding_text=text,
+            embedding_text=None,
             metadata=metadata,
             embedding=None,
         )
@@ -102,46 +116,126 @@ class ChunkModelFactory:
         text: str,
     ) -> ChunkMetadata:
         """Builds canonical metadata for one chunk payload."""
+        payload_data = self._metadata_payload(
+            payload=payload,
+            index=index,
+            total_chunks=total_chunks,
+            metadata_base=metadata_base,
+            text=text,
+        )
+        return ChunkMetadata(**payload_data)
+
+    def _metadata_payload(
+        self,
+        *,
+        payload: RawChunkPayload,
+        index: int,
+        total_chunks: int,
+        metadata_base: dict[str, Any],
+        text: str,
+    ) -> dict[str, Any]:
+        """Build the raw metadata payload before schema validation."""
         source_blocks = payload.source_blocks
         first_block = source_blocks[0]
-        return ChunkMetadata(
-            doc_id=metadata_base["doc_id"],
-            source_path=metadata_base["source_path"],
-            doc_type=metadata_base["doc_type"],
-            doc_date=metadata_base["doc_date"],
-            chunk_index=index,
-            total_chunks=max(total_chunks, 1),
-            source_block_ids=[block.block_id for block in source_blocks],
-            page_start=min(block.page for block in source_blocks),
-            page_end=max(block.page for block in source_blocks),
-            section_title=first_block.section,
-            section_path=self._section_path(first_block=first_block),
-            heading_anchor=payload.heading_anchor,
-            chunk_type=payload.chunk_type,
-            chunking_strategy=payload.chunking_strategy,
-            token_count=payload.token_count
-            or self.tokenization_engine.count_tokens(text),
-            char_count=len(text),
-            overlap_prev=payload.overlap_prev,
-            overlap_next=payload.overlap_next,
-            previous_chunk_id=payload.previous_chunk_id,
-            next_chunk_id=payload.next_chunk_id,
-            contains_table=any(block.block_type == "table" for block in source_blocks),
-            contains_code=any(block.block_type == "code" for block in source_blocks),
-            contains_ocr=any(block.is_ocr for block in source_blocks),
-            avg_confidence=self._average_confidence(blocks=source_blocks),
-            parser_used=self._parser_names(blocks=source_blocks),
-            fallback_used=any(block.is_fallback_used for block in source_blocks),
-            ocr_used=any(bool(block.ocr_used) for block in source_blocks),
-            parse_confidence=self._parse_confidence(blocks=source_blocks),
-            metadata=self._extension_metadata(payload=payload, text=text),
+        payload_data = self._document_metadata(metadata_base=metadata_base)
+        payload_data.update(
+            self._chunk_position_metadata(
+                payload=payload,
+                source_blocks=source_blocks,
+                first_block=first_block,
+                index=index,
+                total_chunks=total_chunks,
+                text=text,
+            )
         )
+        payload_data.update(self._quality_metadata(source_blocks=source_blocks))
+        payload_data["metadata"] = self._extension_metadata(payload=payload, text=text)
+        return payload_data
+
+    def _document_metadata(self, *, metadata_base: dict[str, Any]) -> dict[str, Any]:
+        """Build document-level metadata shared by all chunks in a document."""
+        return {
+            "doc_id": metadata_base["doc_id"],
+            "document_version": metadata_base["document_version"],
+            "source_path": metadata_base["source_path"],
+            "doc_type": metadata_base["doc_type"],
+            "doc_date": metadata_base["doc_date"],
+        }
+
+    def _chunk_position_metadata(
+        self,
+        *,
+        payload: RawChunkPayload,
+        source_blocks: list[ParsedBlock],
+        first_block: ParsedBlock,
+        index: int,
+        total_chunks: int,
+        text: str,
+    ) -> dict[str, Any]:
+        """Build chunk-local positional and lineage metadata."""
+        return {
+            "chunk_index": index,
+            "total_chunks": max(total_chunks, 1),
+            "source_block_ids": self._source_block_ids(blocks=source_blocks),
+            "page_start": self._page_start(blocks=source_blocks),
+            "page_end": self._page_end(blocks=source_blocks),
+            "section_title": first_block.section,
+            "section_path": self._section_path(first_block=first_block),
+            "heading_anchor": payload.heading_anchor,
+            "chunk_type": payload.chunk_type,
+            "chunking_strategy": payload.chunking_strategy,
+            "token_count": payload.token_count
+            or self.tokenization_engine.count_tokens(text),
+            "char_count": len(text),
+            "overlap_prev": payload.overlap_prev,
+            "overlap_next": payload.overlap_next,
+            "previous_chunk_id": payload.previous_chunk_id,
+            "next_chunk_id": payload.next_chunk_id,
+        }
+
+    def _quality_metadata(self, *, source_blocks: list[ParsedBlock]) -> dict[str, Any]:
+        """Build quality and parser provenance metadata."""
+        return {
+            "contains_table": self._contains_table(blocks=source_blocks),
+            "contains_code": self._contains_code(blocks=source_blocks),
+            "contains_ocr": self._contains_ocr(blocks=source_blocks),
+            "avg_confidence": self._average_confidence(blocks=source_blocks),
+            "parser_used": self._parser_names(blocks=source_blocks),
+            "fallback_used": any(block.is_fallback_used for block in source_blocks),
+            "ocr_used": any(bool(block.ocr_used) for block in source_blocks),
+            "parse_confidence": self._parse_confidence(blocks=source_blocks),
+        }
+
+    def _source_block_ids(self, *, blocks: list[ParsedBlock]) -> list[str]:
+        """Return stable source block IDs for chunk lineage."""
+        return [block.block_id for block in blocks]
+
+    def _page_start(self, *, blocks: list[ParsedBlock]) -> int:
+        """Return the earliest contributing page number."""
+        return min(block.page for block in blocks)
+
+    def _page_end(self, *, blocks: list[ParsedBlock]) -> int:
+        """Return the latest contributing page number."""
+        return max(block.page for block in blocks)
+
+    def _contains_table(self, *, blocks: list[ParsedBlock]) -> bool:
+        """Return whether any contributing block is table-shaped."""
+        return any(block.block_type == "table" for block in blocks)
+
+    def _contains_code(self, *, blocks: list[ParsedBlock]) -> bool:
+        """Return whether any contributing block is code-shaped."""
+        return any(block.block_type in {"code", "code_block"} for block in blocks)
+
+    def _contains_ocr(self, *, blocks: list[ParsedBlock]) -> bool:
+        """Return whether any contributing block came from OCR."""
+        return any(block.is_ocr for block in blocks)
 
     def _metadata_base(self, *, parsed_blocks: list[ParsedBlock]) -> dict[str, Any]:
         """Resolves stable document-level defaults shared by all built chunks."""
         if not parsed_blocks:
             return {
                 "doc_id": "unknown_doc",
+                "document_version": None,
                 "source_path": "unknown_source",
                 "doc_type": None,
                 "doc_date": None,
@@ -149,6 +243,7 @@ class ChunkModelFactory:
         first = parsed_blocks[0]
         return {
             "doc_id": first.doc_id or "unknown_doc",
+            "document_version": self._document_version(first.metadata),
             "source_path": first.source_path or "unknown_source",
             "doc_type": first.doc_type,
             "doc_date": self._normalize_doc_date(first.metadata.get("doc_date")),
@@ -360,6 +455,15 @@ class ChunkModelFactory:
                 return date.fromisoformat(value)
             except ValueError:
                 return None
+        return None
+
+    def _document_version(self, metadata: dict[str, Any]) -> str | None:
+        """Extract the stable document version when upstream parsing provided it."""
+        value = metadata.get("document_version")
+        if value is None:
+            return None
+        if isinstance(value, str) and value.strip():
+            return value.strip()
         return None
 
     def _warn_on_boundary_artifact(self, *, text: str, chunk_id: str) -> None:
