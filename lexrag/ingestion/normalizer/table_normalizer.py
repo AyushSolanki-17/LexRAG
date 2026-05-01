@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from lexrag.ingestion.normalizer.base_normalizer import BaseNormalizer
-from lexrag.ingestion.parser.parsed_block import ParsedBlock
+from lexrag.ingestion.parser.schemas.parsed_block import ParsedBlock
 
 _MULTI_SPACES = re.compile(r"[ \t]{2,}")
 

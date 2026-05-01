@@ -6,7 +6,7 @@ import re
 import unicodedata
 
 from lexrag.ingestion.normalizer.base_normalizer import BaseNormalizer
-from lexrag.ingestion.parser.parsed_block import ParsedBlock
+from lexrag.ingestion.parser.schemas.parsed_block import ParsedBlock
 
 _CONTROL_CHARACTERS = {
     codepoint: None for codepoint in range(32) if chr(codepoint) not in {"\n", "\t"}

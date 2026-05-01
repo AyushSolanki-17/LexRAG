@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from lexrag.ingestion.parser.parsed_block import ParsedBlock
+from lexrag.ingestion.parser.schemas.parsed_block import ParsedBlock
 
 
 class RawChunkPayload(BaseModel):

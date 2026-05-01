@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 from lexrag.ingestion.chunker.schemas.chunk import Chunk
-from lexrag.ingestion.parser.parsed_block import ParsedBlock
+from lexrag.ingestion.parser.schemas.parsed_block import ParsedBlock
 
 
 class Chunker(ABC):

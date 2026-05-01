@@ -12,7 +12,7 @@ from lexrag.ingestion.chunker.schemas.chunk import Chunk
 from lexrag.ingestion.chunker.schemas.chunk_metadata import ChunkMetadata
 from lexrag.ingestion.chunker.schemas.raw_chunk_payload import RawChunkPayload
 from lexrag.ingestion.chunker.tokenization_engine import TokenizationEngine
-from lexrag.ingestion.parser.parsed_block import ParsedBlock
+from lexrag.ingestion.parser.schemas.parsed_block import ParsedBlock
 from lexrag.utils import get_logger
 
 logger = get_logger(__name__)

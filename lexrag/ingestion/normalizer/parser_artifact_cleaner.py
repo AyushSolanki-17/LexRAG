@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from lexrag.ingestion.normalizer.base_normalizer import BaseNormalizer
-from lexrag.ingestion.parser.parsed_block import ParsedBlock
+from lexrag.ingestion.parser.schemas.parsed_block import ParsedBlock
 
 _PAGE_NUMBER_LINE = re.compile(r"^\s*page\s+\d+(\s+of\s+\d+)?\s*$", re.IGNORECASE)
 _GENERATED_EXPORT = re.compile(

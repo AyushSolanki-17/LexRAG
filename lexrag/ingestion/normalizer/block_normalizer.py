@@ -15,7 +15,7 @@ from lexrag.ingestion.normalizer.schemas import (
 from lexrag.ingestion.normalizer.section_path_normalizer import SectionPathNormalizer
 from lexrag.ingestion.normalizer.table_normalizer import TableNormalizer
 from lexrag.ingestion.normalizer.text_normalizer import TextNormalizer
-from lexrag.ingestion.parser.parsed_block import ParsedBlock
+from lexrag.ingestion.parser.schemas.parsed_block import ParsedBlock
 
 
 class BlockNormalizer:

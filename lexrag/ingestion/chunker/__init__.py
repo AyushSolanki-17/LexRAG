@@ -30,17 +30,17 @@ __all__ = [
 
 _EXPORTS: dict[str, tuple[str, str]] = {
     "BaseChunker": (".base_chunker", "BaseChunker"),
-    "Chunk": (".chunk", "Chunk"),
-    "ChunkMetadata": (".chunk_metadata", "ChunkMetadata"),
+    "Chunk": (".schemas", "Chunk"),
+    "ChunkMetadata": (".schemas.chunk_metadata", "ChunkMetadata"),
     "ChunkingConfig": (".schemas.chunking_config", "ChunkingConfig"),
     "Chunker": (".chunker", "Chunker"),
     "ChunkModelFactory": (".chunk_model_factory", "ChunkModelFactory"),
     "FixedSizeChunker": (".fixed_size_chunker", "FixedSizeChunker"),
-    "PlannedChunkUnit": (".planned_chunk_unit", "PlannedChunkUnit"),
-    "RawChunkPayload": (".raw_chunk_payload", "RawChunkPayload"),
+    "PlannedChunkUnit": (".schemas.planned_chunk", "PlannedChunk"),
+    "RawChunkPayload": (".schemas.raw_chunk_payload", "RawChunkPayload"),
     "SemanticChunker": (".semantic_chunker", "SemanticChunker"),
     "SimilarityEngine": (".chunk_similarity_engine", "SimilarityEngine"),
-    "TokenContext": (".token_context", "TokenContext"),
+    "TokenContext": (".schemas.token_context", "TokenContext"),
     "TokenizationEngine": (".tokenization_engine", "TokenizationEngine"),
 }
 

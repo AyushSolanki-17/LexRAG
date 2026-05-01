@@ -12,7 +12,7 @@ from lexrag.ingestion.normalizer.schemas import (
     BlockNormalizationConfig,
     build_block_normalization_config,
 )
-from lexrag.ingestion.parser.parsed_block import ParsedBlock
+from lexrag.ingestion.parser.schemas.parsed_block import ParsedBlock
 
 
 class OCRPolicyNormalizer(BaseNormalizer):

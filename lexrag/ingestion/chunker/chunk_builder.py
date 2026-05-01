@@ -7,7 +7,7 @@ from lexrag.ingestion.chunker.schemas.chunking_config import ChunkingConfig
 from lexrag.ingestion.chunker.schemas.planned_chunk import PlannedChunk
 from lexrag.ingestion.chunker.schemas.raw_chunk_payload import RawChunkPayload
 from lexrag.ingestion.chunker.tokenization_engine import TokenizationEngine
-from lexrag.ingestion.parser.parsed_block import ParsedBlock
+from lexrag.ingestion.parser.schemas.parsed_block import ParsedBlock
 
 
 class ChunkBuilder:

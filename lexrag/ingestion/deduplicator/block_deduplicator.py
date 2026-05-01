@@ -12,8 +12,8 @@ from lexrag.ingestion.deduplicator.schemas import (
     DeduplicationRunReport,
 )
 from lexrag.ingestion.deduplicator.similarity_engine import SimilarityEngine
-from lexrag.ingestion.parser.parsed_block import ParsedBlock
-from lexrag.utils.logging import get_logger
+from lexrag.ingestion.parser.schemas.parsed_block import ParsedBlock
+from lexrag.observability.logging_runtime import get_logger
 from lexrag.utils.text import TextNormalizer
 
 logger = get_logger(__name__)

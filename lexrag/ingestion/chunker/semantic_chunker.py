@@ -9,7 +9,7 @@ from lexrag.ingestion.chunker.block_aware_semantic_planner import (
 from lexrag.ingestion.chunker.chunk_builder import ChunkBuilder
 from lexrag.ingestion.chunker.schemas.chunk import Chunk
 from lexrag.ingestion.chunker.schemas.chunking_config import ChunkingConfig
-from lexrag.ingestion.parser.parsed_block import ParsedBlock
+from lexrag.ingestion.parser.schemas.parsed_block import ParsedBlock
 
 
 class SemanticChunker(BaseChunker):

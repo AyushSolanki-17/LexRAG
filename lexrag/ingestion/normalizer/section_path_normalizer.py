@@ -6,7 +6,7 @@ import re
 
 from lexrag.ingestion.normalizer.base_normalizer import BaseNormalizer
 from lexrag.ingestion.normalizer.schemas import BlockNormalizationConfig
-from lexrag.ingestion.parser.parsed_block import ParsedBlock
+from lexrag.ingestion.parser.schemas.parsed_block import ParsedBlock
 
 _ANCHOR_SAFE_PATTERN = re.compile(r"[^a-z0-9]+")
 

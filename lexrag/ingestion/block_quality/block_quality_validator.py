@@ -8,8 +8,8 @@ from lexrag.ingestion.block_quality.schemas import (
     BlockQualityAssessment,
     BlockQualityConfig,
 )
-from lexrag.ingestion.parser.parsed_block import ParsedBlock
-from lexrag.utils.logging import get_logger
+from lexrag.ingestion.parser.schemas.parsed_block import ParsedBlock
+from lexrag.observability.logging_runtime import get_logger
 from lexrag.utils.text import TextNormalizer
 
 logger = get_logger(__name__)
@@ -174,6 +174,8 @@ class BlockQualityValidator:
         ) >= self.config.junk_symbol_ratio_threshold
 
     def _is_parser_anomaly(self, *, block: ParsedBlock) -> bool:
+        if block.block_type in {"table", "code", "code_block", "heading"}:
+            return False
         text = block.text.strip()
         if len(text) < self.config.truncated_block_min_chars:
             return False
