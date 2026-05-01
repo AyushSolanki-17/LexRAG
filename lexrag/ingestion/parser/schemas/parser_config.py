@@ -11,7 +11,18 @@ class ParserConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     allowed_extensions: tuple[str, ...] = Field(
-        default=(".pdf", ".html", ".htm", ".txt", ".md"),
+        default=(
+            ".pdf",
+            ".html",
+            ".htm",
+            ".txt",
+            ".md",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".tif",
+            ".tiff",
+        ),
         description="Extensions accepted by the parsing layer.",
     )
     min_file_size_bytes: int = Field(
@@ -44,4 +55,10 @@ class ParserConfig(BaseModel):
         default=200,
         ge=0,
         description="Maximum average characters per page for image-heavy routing.",
+    )
+    ocr_render_dpi: int = Field(
+        default=300,
+        ge=72,
+        le=600,
+        description="Rasterization DPI used before OCRing scanned PDFs.",
     )

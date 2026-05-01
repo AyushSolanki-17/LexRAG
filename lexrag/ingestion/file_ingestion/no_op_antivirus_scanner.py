@@ -7,6 +7,7 @@ behavior explicit avoids pretending that a scan happened when it did not.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from lexrag.ingestion.file_ingestion.antivirus_scanner import AntivirusScanner
@@ -27,10 +28,15 @@ class NoOpAntivirusScanner(AntivirusScanner):
         Returns:
             Scan result explaining that malware scanning was skipped.
         """
+        blocking = self._is_production_env()
         return AntivirusScanResult(
             engine_name="noop",
             status="skipped",
             details=f"No antivirus scanner configured for {path.name}.",
             signature_name=None,
-            blocking=False,
+            blocking=blocking,
         )
+
+    def _is_production_env(self) -> bool:
+        """Fail closed in production when malware scanning is not configured."""
+        return os.getenv("LEXRAG_ENV", "DEV").upper() == "PROD"

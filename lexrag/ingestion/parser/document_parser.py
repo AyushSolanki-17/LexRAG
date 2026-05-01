@@ -23,7 +23,7 @@ from lexrag.ingestion.parser.parser_selection_strategy import ParserSelectionStr
 from lexrag.ingestion.parser.schemas.document_parse_result import DocumentParseResult
 from lexrag.ingestion.parser.schemas.parsed_block import ParsedBlock
 from lexrag.ingestion.parser.schemas.parser_config import ParserConfig
-from lexrag.utils.logging import get_logger
+from lexrag.observability.logging_runtime import get_logger
 
 logger = get_logger(__name__)
 
@@ -97,6 +97,8 @@ class FallbackDocumentParser:
         """
         resolved_path = Path(path)
         validation = self.validator.validate(resolved_path)
+        if not validation.is_valid:
+            raise ValueError(validation.failure_reason or "validation_failed")
         detection = self.detector.detect(resolved_path)
         selection = self.selector.select(
             path=resolved_path,
@@ -118,11 +120,13 @@ class FallbackDocumentParser:
 
     def _log_success(self, *, path: Path, result: DocumentParseResult) -> None:
         """Log a concise, structured summary of the parse flow."""
+        confidence = result.blocks[0].parse_confidence if result.blocks else 0.0
         logger.info(
-            "Parsed document path=%s parser=%s fallback=%s attempts=%d confidence=%.2f",
+            "Parsed document path=%s parser=%s fallback=%s attempts=%d blocks=%d confidence=%.2f",
             path,
             result.parser_used,
             result.fallback_used,
             len(result.attempts),
-            result.blocks[0].parse_confidence or 0.0,
+            len(result.blocks),
+            confidence or 0.0,
         )

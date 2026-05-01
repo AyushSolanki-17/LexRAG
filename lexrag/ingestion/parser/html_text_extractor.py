@@ -37,5 +37,3 @@ class HtmlTextExtractor(HTMLParser):
 
 
 TextExtractor = HtmlTextExtractor
-
-__all__ = ["HtmlTextExtractor", "TextExtractor"]

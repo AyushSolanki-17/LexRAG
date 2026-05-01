@@ -55,6 +55,7 @@ _YAML_FIELD_PATHS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     ("CACHE_SIMILARITY_THRESHOLD", ("cache", "similarity_threshold")),
     ("CACHE_TTL_SECONDS", ("cache", "ttl_seconds")),
+    ("LEXRAG_ENABLE_HTTP_INGEST", ("api", "enable_http_ingest")),
     ("RATE_LIMIT_PER_MINUTE", ("api", "rate_limit_per_minute")),
     ("INGEST_INPUT_DIR", ("paths", "ingest_input_dir")),
     ("EVAL_DATASET_PATH", ("paths", "eval_dataset_path")),
@@ -168,7 +169,8 @@ class Settings(BaseSettings):
 
     CACHE_SIMILARITY_THRESHOLD: float = Field(default=0.9, ge=0.0, le=1.0)
     CACHE_TTL_SECONDS: int = Field(default=3600, ge=1)
-    API_SECRET_KEY: str = Field(default="dev-secret-key")
+    API_SECRET_KEY: str | None = Field(default=None)
+    LEXRAG_ENABLE_HTTP_INGEST: bool = Field(default=False)
     RATE_LIMIT_PER_MINUTE: int = Field(default=60, ge=1)
 
     INGEST_INPUT_DIR: str = Field(default="data/arxiv/raw")
@@ -191,7 +193,17 @@ def _build_settings() -> Settings:
     _validate_yaml_policy(yaml_data)
     settings = Settings()
     settings = _apply_yaml_fallback(settings, yaml_data)
+    _validate_runtime_security(settings)
     return settings.model_copy(update={"yaml_config": yaml_data})
+
+
+def _validate_runtime_security(settings: Settings) -> None:
+    """Reject insecure runtime defaults in production environments."""
+    if settings.LEXRAG_ENV != "PROD":
+        return
+    if settings.API_SECRET_KEY:
+        return
+    raise ValueError("API_SECRET_KEY must be set when LEXRAG_ENV=PROD")
 
 
 @lru_cache(maxsize=1)

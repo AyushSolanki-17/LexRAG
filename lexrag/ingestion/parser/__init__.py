@@ -21,6 +21,7 @@ from typing import Any
 from .base_document_parser import BaseDocumentParser
 from .docling_parser import DoclingParser
 from .document_parser import FallbackDocumentParser
+from .document_parser_protocol import DocumentParserProtocol
 from .manual_recovery_required_error import ManualRecoveryRequiredError
 from .pymupdf_parser import PyMuPDFParser
 from .schemas import (
@@ -63,6 +64,7 @@ __all__ = [
     "BaseDocumentParser",
     "DoclingParser",
     "DocumentParseResult",
+    "DocumentParserProtocol",
     "FallbackDocumentParser",
     "ManualRecoveryRequiredError",
     "ParseAttempt",

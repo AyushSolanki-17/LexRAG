@@ -14,7 +14,7 @@ from pydantic_settings import BaseSettings
 
 from lexrag.ingestion.parser.base_document_parser import BaseDocumentParser
 from lexrag.ingestion.parser.schemas.parsed_block import ParsedBlock
-from lexrag.utils.logging import get_logger
+from lexrag.observability.logging_runtime import get_logger
 
 logger = get_logger(__name__)
 
