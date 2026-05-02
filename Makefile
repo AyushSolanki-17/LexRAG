@@ -4,8 +4,8 @@ format:
 	uv run --extra dev ruff format .
 
 lint:
-	uv run --extra dev ruff check .
-	uv run --extra dev python -m mypy lexrag/audit lexrag/citation lexrag/config lexrag/context_builder lexrag/eval lexrag/generation lexrag/indexing lexrag/ingestion lexrag/observability lexrag/retrieval lexrag/serving lexrag/utils lexrag/vector
+	uv run --extra dev ruff check . --fix
+	uv run --extra dev python -m mypy lexrag
 
 test:
 	uv run --extra dev pytest tests/
