@@ -15,11 +15,13 @@ class FileLoadResult(BaseModel):
     requested_path: str = Field(
         description="Original user- or caller-provided path string."
     )
-    resolved_path: str = Field(
-        description="Canonical absolute file path after safety checks."
+    resolved_path: str | None = Field(
+        default=None,
+        description="Canonical absolute file path after safety checks.",
     )
-    ingestion_report: FileIngestionReport = Field(
-        description="Validation and detection report for the resolved file."
+    ingestion_report: FileIngestionReport | None = Field(
+        default=None,
+        description="Validation and detection report for the resolved file.",
     )
     is_ready: bool = Field(
         description="Whether the file is permitted to proceed into parsing."
@@ -27,4 +29,8 @@ class FileLoadResult(BaseModel):
     rejection_reason: str | None = Field(
         default=None,
         description="Stable blocking reason when the file cannot proceed.",
+    )
+    failure_message: str | None = Field(
+        default=None,
+        description="Human-readable explanation for load failures before inspection.",
     )

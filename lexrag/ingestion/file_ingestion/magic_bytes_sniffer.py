@@ -108,7 +108,9 @@ class MagicBytesSniffer:
         if any(name.startswith("ppt/") for name in names):
             return self._pptx_media_type(), "container"
         if extension in self.config.office_extensions:
-            return self._office_media_type_for_extension(extension=extension), "signature"
+            return self._office_media_type_for_extension(
+                extension=extension
+            ), "signature"
         return "application/zip", "signature"
 
     def _office_media_type_for_extension(self, *, extension: str) -> str:
@@ -122,18 +124,14 @@ class MagicBytesSniffer:
         return "application/zip"
 
     def _docx_media_type(self) -> str:
-        return (
-            "application/vnd.openxmlformats-officedocument."
-            "wordprocessingml.document"
-        )
+        return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
     def _xlsx_media_type(self) -> str:
         return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
     def _pptx_media_type(self) -> str:
         return (
-            "application/vnd.openxmlformats-officedocument."
-            "presentationml.presentation"
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
         )
 
     def _is_likely_text(self, *, sample: bytes) -> bool:

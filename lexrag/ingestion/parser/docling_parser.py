@@ -33,7 +33,7 @@ class DoclingParser(BaseDocumentParser):
             settings: Optional application settings object.
         """
         self.settings = settings
-        self.converter = self._build_converter()
+        self.converter: Any | None = None
 
     def parse(self, path: Path) -> list[ParsedBlock]:
         """Parse a document path into canonical parsed blocks.
@@ -75,9 +75,16 @@ class DoclingParser(BaseDocumentParser):
     def _convert(self, path: Path) -> Any:
         """Run Docling conversion and normalize parser-level failures."""
         try:
-            return self.converter.convert(str(path))
+            converter = self._get_converter()
+            return converter.convert(str(path))
         except Exception as exc:
             raise RuntimeError(f"Docling failed to parse {path}") from exc
+
+    def _get_converter(self) -> Any:
+        """Build and cache the Docling converter only when it is first needed."""
+        if self.converter is None:
+            self.converter = self._build_converter()
+        return self.converter
 
     def _normalize_blocks(self, *, result: Any, path: Path) -> list[ParsedBlock]:
         """Choose the highest-fidelity output representation available."""
@@ -157,7 +164,10 @@ class DoclingParser(BaseDocumentParser):
         text: str,
     ) -> ParsedBlock:
         """Build one parsed block from one Docling item."""
-        page = self._resolve_page_number(value=getattr(item, "page_no", 1))
+        provenance = self._primary_provenance(item=item)
+        page = self._resolve_page_number(
+            value=self._resolve_page_value(item=item, provenance=provenance)
+        )
         confidence = self._resolve_confidence(value=getattr(item, "confidence", None))
         return ParsedBlock(
             **defaults,
@@ -168,7 +178,7 @@ class DoclingParser(BaseDocumentParser):
             block_type=self._detect_block_type(item=item),
             text=text,
             markdown=text,
-            bbox=self._normalize_bbox(value=getattr(item, "bbox", None)),
+            bbox=self._resolve_bbox(item=item, provenance=provenance),
             order_in_page=order,
             is_ocr=self._resolve_item_bool(
                 item=item,
@@ -178,6 +188,36 @@ class DoclingParser(BaseDocumentParser):
             parse_confidence=confidence,
             metadata={"parser": self.parser_name, "extraction_mode": "structured"},
         )
+
+    def _primary_provenance(self, *, item: Any) -> Any | None:
+        """Return the first Docling provenance record when present."""
+        provenance = getattr(item, "prov", None)
+        if isinstance(provenance, list) and provenance:
+            return provenance[0]
+        return None
+
+    def _resolve_page_value(self, *, item: Any, provenance: Any | None) -> Any:
+        """Resolve page number from direct attributes or provenance fallback."""
+        direct_page = getattr(item, "page_no", None)
+        if direct_page is not None:
+            return direct_page
+        if provenance is not None:
+            return getattr(provenance, "page_no", 1)
+        return 1
+
+    def _resolve_bbox(
+        self,
+        *,
+        item: Any,
+        provenance: Any | None,
+    ) -> tuple[float, float, float, float] | None:
+        """Resolve bbox from direct item fields or Docling provenance."""
+        bbox = self._normalize_bbox(value=getattr(item, "bbox", None))
+        if bbox is not None:
+            return bbox
+        if provenance is None:
+            return None
+        return self._normalize_bbox(value=getattr(provenance, "bbox", None))
 
     def _extract_content(self, *, document: Any, path: Path) -> str:
         """Extract best-effort content when structured items are unavailable."""
@@ -346,10 +386,30 @@ class DoclingParser(BaseDocumentParser):
         self, *, value: Any
     ) -> tuple[float, float, float, float] | None:
         """Normalize bounding boxes into float tuples."""
-        if not isinstance(value, (tuple, list)) or len(value) != 4:
+        parts = self._bbox_parts(value=value)
+        if parts is None:
             return None
         try:
-            x1, y1, x2, y2 = (float(part) for part in value)
+            x1, y1, x2, y2 = (float(part) for part in parts)
         except (TypeError, ValueError):
             return None
         return (x1, y1, x2, y2)
+
+    def _bbox_parts(self, *, value: Any) -> tuple[Any, Any, Any, Any] | None:
+        """Extract raw bbox coordinates from common backend-specific shapes."""
+        if isinstance(value, (tuple, list)) and len(value) == 4:
+            return tuple(value)
+        attr_sets = (
+            ("x0", "y0", "x1", "y1"),
+            ("l", "t", "r", "b"),
+            ("left", "top", "right", "bottom"),
+        )
+        for names in attr_sets:
+            if all(hasattr(value, name) for name in names):
+                return tuple(getattr(value, name) for name in names)
+        as_tuple = getattr(value, "as_tuple", None)
+        if callable(as_tuple):
+            realized = as_tuple()
+            if isinstance(realized, (tuple, list)) and len(realized) == 4:
+                return tuple(realized)
+        return None

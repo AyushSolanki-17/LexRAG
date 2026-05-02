@@ -9,7 +9,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from lexrag.ingestion.file_ingestion import FileIngestionConfig, FileLoaderPipeline
+from lexrag.ingestion.file_ingestion import (
+    FileIngestionConfig,
+    FileIngestionReport,
+    FileLoaderPipeline,
+    FileLoadResult,
+)
 from lexrag.ingestion.parser.manual_recovery_required_error import (
     ManualRecoveryRequiredError,
 )
@@ -98,11 +103,16 @@ class FallbackDocumentParser:
             ManualRecoveryRequiredError: If every parser strategy is exhausted.
         """
         load_result = self.file_loader.load_file(path)
-        resolved_path = Path(load_result.resolved_path)
-        validation = load_result.ingestion_report.validation
-        if not validation.is_valid:
+        return self.parse_loaded_file(load_result)
+
+    def parse_loaded_file(self, load_result: FileLoadResult) -> DocumentParseResult:
+        """Parse a file that has already passed through the loader boundary."""
+        report = self._require_ingestion_report(load_result=load_result)
+        validation = report.validation
+        if not load_result.is_ready or not validation.is_valid:
             raise ValueError(validation.failure_reason or "validation_failed")
-        detection = load_result.ingestion_report.detection
+        resolved_path = Path(load_result.resolved_path or "")
+        detection = report.detection
         selection = self.selector.select(
             path=resolved_path,
             validation=validation,
@@ -140,4 +150,23 @@ class FallbackDocumentParser:
             min_file_size_bytes=self.config.min_file_size_bytes,
             max_file_size_bytes=self.config.max_file_size_bytes,
             magic_byte_window=self.config.magic_byte_window,
+            follow_symlinks=self.config.follow_symlinks,
+            allowed_root_paths=self.config.allowed_root_paths,
+            max_batch_files=self.config.max_batch_files,
+            clamav_socket_path=self.config.clamav_socket_path,
+            clamav_host=self.config.clamav_host,
+            clamav_port=self.config.clamav_port,
+            block_on_missing_antivirus=self.config.block_on_missing_antivirus,
+            block_on_antivirus_error=self.config.block_on_antivirus_error,
         )
+
+    def _require_ingestion_report(
+        self,
+        *,
+        load_result: FileLoadResult,
+    ) -> FileIngestionReport:
+        report = load_result.ingestion_report
+        if report is not None:
+            return report
+        reason = load_result.rejection_reason or "load_failed"
+        raise ValueError(reason)

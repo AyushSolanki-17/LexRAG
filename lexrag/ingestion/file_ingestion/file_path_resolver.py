@@ -42,6 +42,5 @@ class FilePathResolver:
 
     def _allowed_roots(self) -> tuple[Path, ...]:
         return tuple(
-            Path(root).expanduser().resolve()
-            for root in self.config.allowed_root_paths
+            Path(root).expanduser().resolve() for root in self.config.allowed_root_paths
         )

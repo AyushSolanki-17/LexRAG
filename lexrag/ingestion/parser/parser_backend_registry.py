@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from lexrag.ingestion.parser.base_document_parser import BaseDocumentParser
@@ -33,14 +34,37 @@ class ParserBackendRegistry:
             ocr_parser: Optional override for the OCR backend.
             manual_recovery_parser: Optional override for the manual recovery backend.
         """
-        self._parsers = {
-            "docling": primary_parser or DoclingParser(),
-            "pymupdf": fallback_parser or PyMuPDFParser(),
-            "unstructured": unstructured_parser or UnstructuredParser(),
-            "ocr_only": ocr_parser or OCROnlyParser(),
-            "manual_recovery": manual_recovery_parser or ManualRecoveryParser(),
+        self._provided_parsers = {
+            "docling": primary_parser,
+            "pymupdf": fallback_parser,
+            "unstructured": unstructured_parser,
+            "ocr_only": ocr_parser,
+            "manual_recovery": manual_recovery_parser,
         }
+        self._parser_factories = self._build_factories()
+        self._parsers: dict[str, BaseDocumentParser | Any] = {}
 
     def get(self, parser_name: str) -> BaseDocumentParser | Any:
         """Return the parser backend registered under ``parser_name``."""
-        return self._parsers[parser_name]
+        parser = self._parsers.get(parser_name)
+        if parser is not None:
+            return parser
+        parser = self._build_parser(parser_name=parser_name)
+        self._parsers[parser_name] = parser
+        return parser
+
+    def _build_factories(self) -> dict[str, Callable[[], BaseDocumentParser | Any]]:
+        return {
+            "docling": DoclingParser,
+            "pymupdf": PyMuPDFParser,
+            "unstructured": UnstructuredParser,
+            "ocr_only": OCROnlyParser,
+            "manual_recovery": ManualRecoveryParser,
+        }
+
+    def _build_parser(self, *, parser_name: str) -> BaseDocumentParser | Any:
+        provided = self._provided_parsers.get(parser_name)
+        if provided is not None:
+            return provided
+        factory = self._parser_factories[parser_name]
+        return factory()

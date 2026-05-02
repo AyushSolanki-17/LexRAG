@@ -48,7 +48,7 @@ class ParserSelectionStrategy:
             return self._ocr_first_selection(reason="image_document")
         if detection.detected_type == "pdf":
             return self._select_pdf_path(path=path)
-        if detection.detected_type in {"html", "text"}:
+        if detection.detected_type in {"html", "text", "office", "xml", "email"}:
             return self._secondary_only_selection(reason=detection.detected_type)
         return self._secondary_only_selection(reason="unsupported_primary_type")
 

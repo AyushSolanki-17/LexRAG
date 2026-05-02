@@ -52,23 +52,68 @@ class FileLoaderPipeline:
         resolved = self.resolver.resolve(path)
         if resolved.is_file():
             return [self.load_file(resolved)]
-        files = self._collect_files(path=resolved, recursive=recursive)
-        reports = self.gateway.inspect_batch(files)
-        return self._build_batch_results(
-            requested_path=requested,
-            files=files,
+        candidates = self._collect_candidates(path=resolved, recursive=recursive)
+        return self._load_candidates(requested_path=requested, candidates=candidates)
+
+    def _collect_candidates(self, *, path: Path, recursive: bool) -> list[Path]:
+        iterator = path.rglob("*") if recursive else path.iterdir()
+        candidates = sorted(
+            item for item in iterator if item.is_file() or item.is_symlink()
+        )
+        if not candidates:
+            raise FileNotFoundError(f"No files were found under path: {path}")
+        if len(candidates) > self.config.max_batch_files:
+            raise ValueError("batch_limit_exceeded")
+        return candidates
+
+    def _load_candidates(
+        self,
+        *,
+        requested_path: str,
+        candidates: list[Path],
+    ) -> list[FileLoadResult]:
+        resolved_specs, failed = self._resolve_candidates(
+            requested_path=requested_path,
+            candidates=candidates,
+        )
+        resolved_files = [path for _index, path in resolved_specs]
+        if not resolved_files:
+            return [failed[index] for index in sorted(failed)]
+        reports = self.gateway.inspect_batch(resolved_files)
+        loaded = self._build_batch_results(
+            requested_path=requested_path,
+            files=resolved_files,
             reports=reports,
         )
+        loaded_by_index = {
+            index: result
+            for (index, _path), result in zip(resolved_specs, loaded, strict=True)
+        }
+        return [
+            loaded_by_index.get(index) or failed[index]
+            for index in range(len(candidates))
+            if index in loaded_by_index or index in failed
+        ]
 
-    def _collect_files(self, *, path: Path, recursive: bool) -> list[Path]:
-        iterator = path.rglob("*") if recursive else path.iterdir()
-        files = [self.resolver.resolve(item) for item in iterator if item.is_file()]
-        files.sort()
-        if not files:
-            raise FileNotFoundError(f"No files were found under path: {path}")
-        if len(files) > self.config.max_batch_files:
-            raise ValueError("batch_limit_exceeded")
-        return files
+    def _resolve_candidates(
+        self,
+        *,
+        requested_path: str,
+        candidates: list[Path],
+    ) -> tuple[list[tuple[int, Path]], dict[int, FileLoadResult]]:
+        resolved_files: list[tuple[int, Path]] = []
+        failed: dict[int, FileLoadResult] = {}
+        for index, candidate in enumerate(candidates):
+            try:
+                resolved_files.append((index, self.resolver.resolve(candidate)))
+            except (FileNotFoundError, PermissionError, OSError, ValueError) as exc:
+                failed[index] = self._build_failed_result(
+                    requested_path=requested_path,
+                    candidate_path=candidate,
+                    reason=self._failure_reason(exc),
+                    message=str(exc),
+                )
+        return resolved_files, failed
 
     def _build_batch_results(
         self,
@@ -102,7 +147,36 @@ class FileLoaderPipeline:
             rejection_reason=validation.failure_reason,
         )
 
+    def _build_failed_result(
+        self,
+        *,
+        requested_path: str,
+        candidate_path: Path,
+        reason: str,
+        message: str,
+    ) -> FileLoadResult:
+        return FileLoadResult(
+            requested_path=requested_path,
+            resolved_path=str(candidate_path),
+            ingestion_report=None,
+            is_ready=False,
+            rejection_reason=reason,
+            failure_message=message,
+        )
+
     def _assert_file(self, path: Path) -> None:
         if path.is_file():
             return
         raise FileNotFoundError(f"Document is not a file: {path}")
+
+    def _failure_reason(self, exc: Exception) -> str:
+        message = str(exc).lower()
+        if "symlinked" in message:
+            return "symlink_not_allowed"
+        if "outside the configured roots" in message:
+            return "outside_allowed_roots"
+        if "does not exist" in message:
+            return "file_not_found"
+        if "not a file" in message:
+            return "not_a_file"
+        return exc.__class__.__name__

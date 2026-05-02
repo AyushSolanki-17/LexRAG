@@ -22,10 +22,12 @@ from .base_document_parser import BaseDocumentParser
 from .docling_parser import DoclingParser
 from .document_parser import FallbackDocumentParser
 from .document_parser_protocol import DocumentParserProtocol
+from .file_parser_pipeline import FileParserPipeline
 from .manual_recovery_required_error import ManualRecoveryRequiredError
 from .pymupdf_parser import PyMuPDFParser
 from .schemas import (
     DocumentParseResult,
+    FileParseResult,
     ParseAttempt,
     ParsedBlock,
     ParsedPage,
@@ -66,6 +68,8 @@ __all__ = [
     "DocumentParseResult",
     "DocumentParserProtocol",
     "FallbackDocumentParser",
+    "FileParseResult",
+    "FileParserPipeline",
     "ManualRecoveryRequiredError",
     "ParseAttempt",
     "ParsedBlock",
