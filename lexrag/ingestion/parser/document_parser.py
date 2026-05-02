@@ -9,8 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from lexrag.ingestion.parser.file_type_detector import FileTypeDetector
-from lexrag.ingestion.parser.file_validation_service import FileValidationService
+from lexrag.ingestion.file_ingestion import FileIngestionConfig, FileLoaderPipeline
 from lexrag.ingestion.parser.manual_recovery_required_error import (
     ManualRecoveryRequiredError,
 )
@@ -45,6 +44,7 @@ class FallbackDocumentParser:
         unstructured_parser: object | None = None,
         ocr_parser: object | None = None,
         manual_recovery_parser: object | None = None,
+        file_loader: FileLoaderPipeline | None = None,
     ) -> None:
         """Initialize parsing collaborators.
 
@@ -55,10 +55,12 @@ class FallbackDocumentParser:
             unstructured_parser: Optional unstructured parser override.
             ocr_parser: Optional OCR parser override.
             manual_recovery_parser: Optional manual recovery backend override.
+            file_loader: Optional file-ingestion boundary override.
         """
         self.config = config or ParserConfig()
-        self.validator = FileValidationService(config=self.config)
-        self.detector = FileTypeDetector(config=self.config)
+        self.file_loader = file_loader or FileLoaderPipeline(
+            config=self._file_ingestion_config()
+        )
         self.selector = ParserSelectionStrategy(config=self.config)
         self.registry = ParserBackendRegistry(
             primary_parser=primary_parser,
@@ -95,11 +97,12 @@ class FallbackDocumentParser:
         Raises:
             ManualRecoveryRequiredError: If every parser strategy is exhausted.
         """
-        resolved_path = Path(path)
-        validation = self.validator.validate(resolved_path)
+        load_result = self.file_loader.load_file(path)
+        resolved_path = Path(load_result.resolved_path)
+        validation = load_result.ingestion_report.validation
         if not validation.is_valid:
             raise ValueError(validation.failure_reason or "validation_failed")
-        detection = self.detector.detect(resolved_path)
+        detection = load_result.ingestion_report.detection
         selection = self.selector.select(
             path=resolved_path,
             validation=validation,
@@ -129,4 +132,12 @@ class FallbackDocumentParser:
             len(result.attempts),
             len(result.blocks),
             confidence or 0.0,
+        )
+
+    def _file_ingestion_config(self) -> FileIngestionConfig:
+        return FileIngestionConfig(
+            allowed_extensions=self.config.allowed_extensions,
+            min_file_size_bytes=self.config.min_file_size_bytes,
+            max_file_size_bytes=self.config.max_file_size_bytes,
+            magic_byte_window=self.config.magic_byte_window,
         )

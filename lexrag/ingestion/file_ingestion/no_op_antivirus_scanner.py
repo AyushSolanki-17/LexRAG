@@ -14,10 +14,16 @@ from lexrag.ingestion.file_ingestion.antivirus_scanner import AntivirusScanner
 from lexrag.ingestion.file_ingestion.schemas.antivirus_scan_result import (
     AntivirusScanResult,
 )
+from lexrag.ingestion.file_ingestion.schemas.file_ingestion_config import (
+    FileIngestionConfig,
+)
 
 
 class NoOpAntivirusScanner(AntivirusScanner):
     """Return a structured "skipped" scan result when no scanner is configured."""
+
+    def __init__(self, config: FileIngestionConfig | None = None) -> None:
+        self.config = config or FileIngestionConfig()
 
     def scan(self, path: Path) -> AntivirusScanResult:
         """Return a non-blocking placeholder result.
@@ -39,4 +45,6 @@ class NoOpAntivirusScanner(AntivirusScanner):
 
     def _is_production_env(self) -> bool:
         """Fail closed in production when malware scanning is not configured."""
+        if self.config.block_on_missing_antivirus is not None:
+            return self.config.block_on_missing_antivirus
         return os.getenv("LEXRAG_ENV", "DEV").upper() == "PROD"

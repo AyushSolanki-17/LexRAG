@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from lexrag.ingestion.parser.schemas.file_type_detection import FileTypeDetection
-from lexrag.ingestion.parser.schemas.file_validation_result import FileValidationResult
+from lexrag.ingestion.file_ingestion.schemas.file_type_detection import (
+    FileTypeDetection,
+)
+from lexrag.ingestion.file_ingestion.schemas.file_validation_result import (
+    FileValidationResult,
+)
 from lexrag.ingestion.parser.schemas.parser_config import ParserConfig
 from lexrag.ingestion.parser.schemas.parser_selection import ParserSelection
 

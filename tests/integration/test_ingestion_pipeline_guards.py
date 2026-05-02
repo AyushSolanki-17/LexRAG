@@ -6,15 +6,15 @@ from unittest.mock import Mock
 import pytest
 
 from lexrag.indexing.bm25_store import BM25Store
-from lexrag.vector.qdrant_store import QdrantStore
 from lexrag.ingestion.chunker.fixed_size_chunker import FixedSizeChunker
 from lexrag.ingestion.embeddings.build_embedder import build_embedder
 from lexrag.ingestion.parser.document_parser import FallbackDocumentParser
-from lexrag.ingestion.parser.schemas.parsed_block import ParsedBlock
 from lexrag.ingestion.parser.schemas.document_parse_result import DocumentParseResult
 from lexrag.ingestion.parser.schemas.parse_attempt import ParseAttempt
+from lexrag.ingestion.parser.schemas.parsed_block import ParsedBlock
 from lexrag.ingestion.parser.schemas.parser_selection import ParserSelection
 from lexrag.ingestion.pipeline import IngestPipeline
+from lexrag.vector.qdrant_store import QdrantStore
 
 
 class StubDocumentParser:

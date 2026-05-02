@@ -58,6 +58,41 @@ class FileIngestionConfig(BaseModel):
         ge=64,
         description="Leading byte window used for MIME sniffing and header checks.",
     )
+    follow_symlinks: bool = Field(
+        default=False,
+        description="Whether file loading may traverse symlinked paths.",
+    )
+    max_batch_files: int = Field(
+        default=1000,
+        ge=1,
+        description="Maximum number of concrete files a single load request may expand to.",
+    )
+    allowed_root_paths: tuple[str, ...] = Field(
+        default=(),
+        description="Optional absolute roots that loaded files must remain inside.",
+    )
+    clamav_socket_path: str | None = Field(
+        default=None,
+        description="Optional UNIX socket path for a local ClamAV daemon.",
+    )
+    clamav_host: str | None = Field(
+        default=None,
+        description="Optional hostname for a network-accessible ClamAV daemon.",
+    )
+    clamav_port: int | None = Field(
+        default=None,
+        ge=1,
+        le=65535,
+        description="Optional port for a network-accessible ClamAV daemon.",
+    )
+    block_on_missing_antivirus: bool | None = Field(
+        default=None,
+        description="Override for whether missing antivirus should block ingestion.",
+    )
+    block_on_antivirus_error: bool = Field(
+        default=True,
+        description="Whether antivirus runtime errors should block ingestion.",
+    )
     extension_media_type_map: dict[str, tuple[str, ...]] = Field(
         default={
             ".pdf": ("application/pdf",),
@@ -88,6 +123,7 @@ class FileIngestionConfig(BaseModel):
     validation_messages: dict[str, str] = Field(
         default={
             "antivirus_infected": "The file was blocked by antivirus scanning.",
+            "antivirus_error": "The antivirus scan could not be completed safely.",
             "corrupt_file": "The file appears malformed or truncated.",
             "duplicate_file_in_batch": "The same file content was uploaded twice in one batch.",
             "encrypted_pdf": "Encrypted PDFs must be decrypted before ingestion.",
