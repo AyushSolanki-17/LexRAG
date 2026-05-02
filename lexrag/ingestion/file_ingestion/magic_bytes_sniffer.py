@@ -7,6 +7,7 @@ falls back to conservative signature-based heuristics.
 
 from __future__ import annotations
 
+import zipfile
 from pathlib import Path
 
 from lexrag.ingestion.file_ingestion.schemas.file_ingestion_config import (
@@ -43,6 +44,7 @@ class MagicBytesSniffer:
         if magic_result is not None:
             return magic_result, "python-magic"
         return self._sniff_with_signatures(
+            path=path,
             sample=sample,
             extension=path.suffix.lower(),
         )
@@ -64,6 +66,7 @@ class MagicBytesSniffer:
     def _sniff_with_signatures(
         self,
         *,
+        path: Path,
         sample: bytes,
         extension: str,
     ) -> tuple[str, str]:
@@ -72,7 +75,7 @@ class MagicBytesSniffer:
         if sample.startswith(b"%PDF"):
             return "application/pdf", "signature"
         if sample.startswith(b"PK\x03\x04"):
-            return self._office_media_type(extension=extension), "signature"
+            return self._sniff_zip_container(path=path, extension=extension)
         if sample.startswith(b"\x89PNG\r\n\x1a\n"):
             return "image/png", "signature"
         if sample.startswith((b"\xff\xd8\xff",)):
@@ -89,21 +92,49 @@ class MagicBytesSniffer:
             return "text/plain", "heuristic"
         return "application/octet-stream", "unknown"
 
-    def _office_media_type(self, *, extension: str) -> str:
-        """Map OOXML extensions onto their canonical media types."""
+    def _sniff_zip_container(self, *, path: Path, extension: str) -> tuple[str, str]:
+        """Inspect ZIP-based containers to identify concrete OOXML document types."""
+        try:
+            with zipfile.ZipFile(path) as archive:
+                names = set(archive.namelist())
+        except zipfile.BadZipFile:
+            return "application/zip", "signature"
+        if "[Content_Types].xml" not in names:
+            return "application/zip", "signature"
+        if any(name.startswith("word/") for name in names):
+            return self._docx_media_type(), "container"
+        if any(name.startswith("xl/") for name in names):
+            return self._xlsx_media_type(), "container"
+        if any(name.startswith("ppt/") for name in names):
+            return self._pptx_media_type(), "container"
+        if extension in self.config.office_extensions:
+            return self._office_media_type_for_extension(extension=extension), "signature"
+        return "application/zip", "signature"
+
+    def _office_media_type_for_extension(self, *, extension: str) -> str:
+        """Map configured OOXML extensions onto canonical media types."""
         if extension == ".docx":
-            return (
-                "application/vnd.openxmlformats-officedocument."
-                "wordprocessingml.document"
-            )
+            return self._docx_media_type()
         if extension == ".xlsx":
-            return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            return self._xlsx_media_type()
         if extension == ".pptx":
-            return (
-                "application/vnd.openxmlformats-officedocument."
-                "presentationml.presentation"
-            )
+            return self._pptx_media_type()
         return "application/zip"
+
+    def _docx_media_type(self) -> str:
+        return (
+            "application/vnd.openxmlformats-officedocument."
+            "wordprocessingml.document"
+        )
+
+    def _xlsx_media_type(self) -> str:
+        return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+    def _pptx_media_type(self) -> str:
+        return (
+            "application/vnd.openxmlformats-officedocument."
+            "presentationml.presentation"
+        )
 
     def _is_likely_text(self, *, sample: bytes) -> bool:
         """Identify UTF-safe text payloads without being overly optimistic."""

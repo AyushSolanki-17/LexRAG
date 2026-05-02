@@ -9,6 +9,8 @@ description = "Reusable enterprise RAG platform SDK for ingestion and retrieval"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "ipykernel>=7.2.0",
+  "jupyterlab>=4.5.7",
   "pydantic==2.13.1",
   "pydantic-settings==2.13.1",
   "python-dotenv==1.2.2",

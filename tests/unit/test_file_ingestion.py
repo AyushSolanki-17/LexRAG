@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+import sys
 import zipfile
 from pathlib import Path
 
 import pytest
 
 from lexrag.ingestion.file_ingestion import (
+    ClamAVAntivirusScanner,
     FileIngestionGateway,
     FileTypeDetector,
     FileValidationService,
+    build_antivirus_scanner,
+)
+from lexrag.ingestion.file_ingestion.schemas.file_ingestion_config import (
+    FileIngestionConfig,
 )
 
 
@@ -96,3 +102,81 @@ def test_validation_blocks_when_no_antivirus_is_configured_in_prod(
     assert result.antivirus.status == "skipped"
     assert result.antivirus.blocking is True
     assert result.failure_reason == "antivirus_infected"
+
+
+def test_file_type_detector_identifies_ooxml_from_zip_contents(
+    tmp_path: Path,
+) -> None:
+    docx_path = tmp_path / "mislabeled.bin"
+    with zipfile.ZipFile(docx_path, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types/>")
+        archive.writestr("word/document.xml", "<w:document/>")
+
+    detection = FileTypeDetector().detect(docx_path)
+
+    assert detection.media_type == (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    assert detection.document_family == "office"
+
+
+def test_build_antivirus_scanner_prefers_clamav_when_configured() -> None:
+    scanner = build_antivirus_scanner(
+        FileIngestionConfig(clamav_socket_path="/var/run/clamd.sock")
+    )
+
+    assert isinstance(scanner, ClamAVAntivirusScanner)
+
+
+def test_clamav_scanner_returns_clean_result(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "contract.pdf"
+    path.write_bytes(b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\n")
+
+    class FakeClient:
+        def scan(self, _path: str) -> None:
+            return None
+
+    class FakeClamdModule:
+        def ClamdUnixSocket(self, path: str | None = None) -> FakeClient:
+            assert path == "/tmp/clamd.sock"
+            return FakeClient()
+
+    monkeypatch.setitem(sys.modules, "clamd", FakeClamdModule())
+    scanner = ClamAVAntivirusScanner(
+        FileIngestionConfig(clamav_socket_path="/tmp/clamd.sock")
+    )
+
+    result = scanner.scan(path)
+
+    assert result.status == "clean"
+    assert result.blocking is False
+
+
+def test_clamav_scanner_blocks_on_runtime_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "contract.pdf"
+    path.write_bytes(b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\n")
+
+    class FakeClient:
+        def scan(self, _path: str) -> None:
+            raise RuntimeError("clamd unavailable")
+
+    class FakeClamdModule:
+        def ClamdUnixSocket(self, path: str | None = None) -> FakeClient:
+            assert path == "/tmp/clamd.sock"
+            return FakeClient()
+
+    monkeypatch.setitem(sys.modules, "clamd", FakeClamdModule())
+    scanner = ClamAVAntivirusScanner(
+        FileIngestionConfig(
+            clamav_socket_path="/tmp/clamd.sock",
+            block_on_antivirus_error=True,
+        )
+    )
+
+    result = scanner.scan(path)
+
+    assert result.status == "error"
+    assert result.blocking is True

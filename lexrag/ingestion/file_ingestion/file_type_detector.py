@@ -79,8 +79,10 @@ class FileTypeDetector:
         """Collapse low-level media types into parser-friendly families."""
         if media_type == "application/pdf":
             return "pdf"
-        if media_type.startswith("image/"):
+        if media_type.startswith("image/") or extension in self.config.image_extensions:
             return "image"
+        if media_type.startswith("application/vnd.openxmlformats-officedocument."):
+            return "office"
         if media_type == "text/html":
             return "html"
         if media_type == "application/xml":

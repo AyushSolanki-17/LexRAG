@@ -11,9 +11,11 @@ import zipfile
 from pathlib import Path
 
 from lexrag.ingestion.file_ingestion.antivirus_scanner import AntivirusScanner
+from lexrag.ingestion.file_ingestion.build_antivirus_scanner import (
+    build_antivirus_scanner,
+)
 from lexrag.ingestion.file_ingestion.file_hash_calculator import FileHashCalculator
 from lexrag.ingestion.file_ingestion.magic_bytes_sniffer import MagicBytesSniffer
-from lexrag.ingestion.file_ingestion.no_op_antivirus_scanner import NoOpAntivirusScanner
 from lexrag.ingestion.file_ingestion.schemas.antivirus_scan_result import (
     AntivirusScanResult,
 )
@@ -48,7 +50,9 @@ class FileValidationService:
             sniffer: Optional byte-level content sniffer.
         """
         self.config = config or FileIngestionConfig()
-        self.antivirus_scanner = antivirus_scanner or NoOpAntivirusScanner()
+        self.antivirus_scanner = antivirus_scanner or build_antivirus_scanner(
+            config=self.config
+        )
         self.hash_calculator = hash_calculator or FileHashCalculator()
         self.sniffer = sniffer or MagicBytesSniffer(config=self.config)
 
