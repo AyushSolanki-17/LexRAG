@@ -315,3 +315,5 @@ cython_debug/
 # Node
 node_modules/
 
+# temporarily ignore tests
+tests/
