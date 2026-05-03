@@ -1,15 +1,23 @@
-"""Execute the configured parser chain deterministically."""
+"""Execute the configured parser chain deterministically.
+
+The executor is deliberately dumb about routing. Its job is only to iterate the
+already-selected parser order, capture structured attempt metadata, and stop at
+the first backend that returns usable blocks.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from lexrag.ingestion.parser.error_classification import classify_parse_error
 from lexrag.ingestion.parser.parsed_block_factory import ParsedBlockFactory
-from lexrag.ingestion.parser.parser_backend_registry import ParserBackendRegistry
 from lexrag.ingestion.parser.schemas.document_parse_result import DocumentParseResult
 from lexrag.ingestion.parser.schemas.parse_attempt import ParseAttempt
+from lexrag.ingestion.parser.schemas.parser_backend import ParserBackend
 from lexrag.ingestion.parser.schemas.parser_selection import ParserSelection
+
+from .parser_backend_registry import ParserBackendRegistry
 
 
 class ParserChainExecutor:
@@ -21,12 +29,9 @@ class ParserChainExecutor:
         registry: ParserBackendRegistry,
         block_factory: ParsedBlockFactory | None = None,
     ) -> None:
-        """Initialize the chain executor.
-
-        Args:
-            registry: Parser backend registry.
-            block_factory: Optional parsed block factory.
-        """
+        # ParsedBlockFactory handles a subtle compatibility problem: some
+        # backends return full ParsedBlock objects while others return simpler
+        # payloads. The executor always normalizes before returning success.
         self.registry = registry
         self.block_factory = block_factory or ParsedBlockFactory()
 
@@ -36,17 +41,11 @@ class ParserChainExecutor:
         path: Path,
         selection: ParserSelection,
     ) -> DocumentParseResult:
-        """Execute the parser chain and return a structured parse result.
-
-        Args:
-            path: Document path to parse.
-            selection: Parser selection plan for the document.
-
-        Returns:
-            Structured parse result containing attempts and parsed blocks.
-        """
+        """Execute the parser chain and return a structured parse result."""
         attempts: list[ParseAttempt] = []
         for order, parser_name in enumerate(selection.parser_order, start=1):
+            # The registry hides whether the backend was injected, memoized, or
+            # built lazily from shared config.
             parser = self.registry.get(parser_name)
             parsed, attempt = self._attempt_parse(
                 path=path,
@@ -57,6 +56,8 @@ class ParserChainExecutor:
             attempts.append(attempt)
             if parsed is None:
                 continue
+            # The first non-empty parse result wins. Fallback ordering is the
+            # authoritative policy, so later parsers never "improve" success.
             return self._build_success_result(
                 selection=selection,
                 attempts=attempts,
@@ -70,10 +71,10 @@ class ParserChainExecutor:
         *,
         path: Path,
         parser_name: str,
-        parser,
+        parser: Any,
         fallback_step: int,
     ) -> tuple[list | None, ParseAttempt]:
-        """Attempt one parser backend and capture the outcome."""
+        """Run one backend and capture either success or a structured failure."""
         try:
             parsed = parser.parse(path)
         except Exception as exc:
@@ -85,6 +86,8 @@ class ParserChainExecutor:
                 error_message=str(exc),
             )
         if not parsed:
+            # Empty output is treated as failure because downstream stages cannot
+            # distinguish "parser succeeded but found nothing" from parser loss.
             return None, self._empty_attempt(
                 parser_name=parser_name,
                 fallback_step=fallback_step,
@@ -109,7 +112,7 @@ class ParserChainExecutor:
         error_type: str,
         error_message: str,
     ) -> ParseAttempt:
-        """Build the failed-attempt record for parser execution."""
+        """Create a failed attempt record without losing the original error."""
         return ParseAttempt(
             parser_name=parser_name,
             succeeded=False,
@@ -126,7 +129,8 @@ class ParserChainExecutor:
         parser_name: str,
         fallback_step: int,
     ) -> ParseAttempt:
-        """Build the failed-attempt record for empty parser output."""
+        # Empty parser output is normalized into the same failure shape as hard
+        # exceptions so audits can reason over one attempt schema.
         return self._failed_attempt(
             parser_name=parser_name,
             fallback_step=fallback_step,
@@ -142,7 +146,7 @@ class ParserChainExecutor:
         fallback_step: int,
         produced_blocks: int,
     ) -> ParseAttempt:
-        """Build the successful-attempt record for parser execution."""
+        """Create the success attempt record for the winning backend."""
         return ParseAttempt(
             parser_name=parser_name,
             succeeded=True,
@@ -158,11 +162,13 @@ class ParserChainExecutor:
         parser_name: str,
         parsed: list,
     ) -> DocumentParseResult:
-        """Build the success result returned to the orchestrator."""
+        """Build the terminal success result for the first winning backend."""
         fallback_used = None
         if parser_name != selection.primary_parser_name:
             fallback_used = parser_name
-        ocr_used = parser_name if parser_name == "ocr_only" else None
+        # OCR-only parsing is represented explicitly because generation and eval
+        # code often want to distinguish OCR-derived content from native text.
+        ocr_used = parser_name if parser_name == ParserBackend.OCR_ONLY.value else None
         return DocumentParseResult(
             blocks=parsed,
             attempts=attempts,
@@ -183,13 +189,13 @@ class ParserChainExecutor:
         selection: ParserSelection,
         attempts: list[ParseAttempt],
     ) -> DocumentParseResult:
-        """Build a failure result when no parser backend succeeds."""
+        """Build the terminal failure result when every backend is exhausted."""
         return DocumentParseResult(
             blocks=[],
             attempts=attempts,
             selection=selection,
-            parser_used="manual_recovery",
-            fallback_used="manual_recovery",
+            parser_used=ParserBackend.MANUAL_RECOVERY.value,
+            fallback_used=ParserBackend.MANUAL_RECOVERY.value,
             ocr_used=None,
             scanned_pdf=selection.scanned_pdf,
             encrypted=selection.encrypted,

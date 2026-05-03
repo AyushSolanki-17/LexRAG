@@ -1,7 +1,7 @@
 """Contracts for parser backends.
 
 Backends are intentionally simple: each parser knows how to turn a path into
-parsed blocks, while orchestration lives in ``FallbackDocumentParser``.
+parsed blocks, while orchestration lives in ``DocumentParser``.
 """
 
 from __future__ import annotations

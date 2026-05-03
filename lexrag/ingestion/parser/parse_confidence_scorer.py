@@ -1,4 +1,8 @@
-"""Parser confidence scoring aligned with the architecture document."""
+"""Parser confidence scoring aligned with the architecture document.
+
+The scoring intentionally uses simple, explainable heuristics. It is meant for
+auditability and downstream debugging, not as a learned quality model.
+"""
 
 from __future__ import annotations
 
@@ -28,12 +32,18 @@ class ParseConfidenceScorer:
             Confidence score for downstream audit and quality signals.
         """
         score = 0.3
+        # Non-OCR routes generally preserve more native structure and therefore
+        # start with a stronger confidence prior.
         if not selection.requires_ocr:
             score += 0.4
+        # Tables and heading levels are crude but useful indicators that the
+        # parser preserved structure instead of flattening everything to text.
         if any(block.block_type == "table" for block in blocks):
             score += 0.2
         if any(block.heading_level is not None for block in blocks):
             score += 0.2
+        # OCR and fallback are both reliability penalties because they usually
+        # imply weaker structural fidelity or an upstream parse failure.
         if selection.requires_ocr:
             score -= 0.3
         if self._used_fallback(selection=selection, attempts=attempts):

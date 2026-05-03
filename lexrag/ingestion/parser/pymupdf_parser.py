@@ -7,17 +7,25 @@ extension in tests and guardrail pipelines.
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 from typing import Any
 
 from lexrag.ingestion.parser.base_document_parser import BaseDocumentParser
+from lexrag.ingestion.parser.builders import ParsedBlockBuilder
 from lexrag.ingestion.parser.html_text_extractor import HtmlTextExtractor
 from lexrag.ingestion.parser.schemas.parsed_block import ParsedBlock
 
 
 class PyMuPDFParser(BaseDocumentParser):
     """Fallback parser for PDF, HTML, and text-like recovery paths."""
+
+    def __init__(
+        self,
+        *,
+        block_builder: ParsedBlockBuilder | None = None,
+    ) -> None:
+        """Initialize shared dependencies for fallback parsing."""
+        self.block_builder = block_builder or ParsedBlockBuilder()
 
     def parse(self, path: Path) -> list[ParsedBlock]:
         """Parse a supported document into canonical parsed blocks.
@@ -113,23 +121,12 @@ class PyMuPDFParser(BaseDocumentParser):
         text: str,
     ) -> ParsedBlock:
         """Build a canonical parsed block for this backend."""
-        return ParsedBlock(
-            doc_id=path.stem,
-            source_path=str(path),
-            source_name=path.name,
-            doc_type=path.suffix.lower().lstrip(".") or None,
-            block_id=self._build_block_id(path=path, page=page, order=1, text=text),
+        return self.block_builder.build(
+            path=path,
+            parser_name=self.parser_name,
             page=page,
             section=section,
-            block_type="paragraph",
             text=text,
-            markdown=text,
             order_in_page=1,
-            parser_used=self.parser_name,
             metadata={"parser": self.parser_name, "extraction_mode": "text"},
         )
-
-    def _build_block_id(self, *, path: Path, page: int, order: int, text: str) -> str:
-        """Build deterministic block identifiers."""
-        digest = hashlib.sha1(text[:500].encode("utf-8")).hexdigest()[:12]
-        return f"{path.stem}_p{page}_b{order}_{digest}"

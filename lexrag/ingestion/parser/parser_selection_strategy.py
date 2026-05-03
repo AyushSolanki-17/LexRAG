@@ -1,4 +1,9 @@
-"""Parser selection strategy aligned with the architecture document."""
+"""Deterministic parser selection strategy.
+
+Routing is intentionally conservative: the strategy prefers predictable
+selection and explicit fallback order over trying to be too clever in each
+document family.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +15,7 @@ from lexrag.ingestion.file_ingestion.schemas.file_type_detection import (
 from lexrag.ingestion.file_ingestion.schemas.file_validation_result import (
     FileValidationResult,
 )
+from lexrag.ingestion.parser.schemas.parser_backend import ParserBackend
 from lexrag.ingestion.parser.schemas.parser_config import ParserConfig
 from lexrag.ingestion.parser.schemas.parser_selection import ParserSelection
 
@@ -42,8 +48,12 @@ class ParserSelectionStrategy:
         Returns:
             The deterministic parser routing plan for this document.
         """
+        # Encryption is terminal because none of the automated backends can
+        # safely or reliably extract content from an inaccessible PDF.
         if validation.encrypted:
             return self._manual_recovery_selection(reason="encrypted_pdf")
+        # Standalone images are always OCR-first because there is no native text
+        # extraction path analogous to PDF or HTML parsing.
         if detection.detected_type == "image":
             return self._ocr_first_selection(reason="image_document")
         if detection.detected_type == "pdf":
@@ -59,14 +69,22 @@ class ParserSelectionStrategy:
         if scanned_pdf:
             return self._ocr_first_selection(reason="scanned_pdf", scanned_pdf=True)
         if image_heavy:
+            # Image-heavy PDFs still give Docling the first chance because some
+            # mixed-content documents preserve enough native structure to avoid
+            # a full OCR-only pass.
             return ParserSelection(
-                primary_parser_name="docling",
-                parser_order=["docling", "ocr_only", "pymupdf", "unstructured"],
+                primary_parser_name=ParserBackend.DOCLING.value,
+                parser_order=[
+                    ParserBackend.DOCLING.value,
+                    ParserBackend.OCR_ONLY.value,
+                    ParserBackend.PYMUPDF.value,
+                    ParserBackend.UNSTRUCTURED.value,
+                ],
                 fallback_chain=[
-                    "ocr_only",
-                    "pymupdf",
-                    "unstructured",
-                    "manual_recovery",
+                    ParserBackend.OCR_ONLY.value,
+                    ParserBackend.PYMUPDF.value,
+                    ParserBackend.UNSTRUCTURED.value,
+                    ParserBackend.MANUAL_RECOVERY.value,
                 ],
                 route_reason="image_heavy_pdf",
                 requires_ocr=True,
@@ -75,9 +93,19 @@ class ParserSelectionStrategy:
                 encrypted=False,
             )
         return ParserSelection(
-            primary_parser_name="docling",
-            parser_order=["docling", "pymupdf", "unstructured", "ocr_only"],
-            fallback_chain=["pymupdf", "unstructured", "ocr_only", "manual_recovery"],
+            primary_parser_name=ParserBackend.DOCLING.value,
+            parser_order=[
+                ParserBackend.DOCLING.value,
+                ParserBackend.PYMUPDF.value,
+                ParserBackend.UNSTRUCTURED.value,
+                ParserBackend.OCR_ONLY.value,
+            ],
+            fallback_chain=[
+                ParserBackend.PYMUPDF.value,
+                ParserBackend.UNSTRUCTURED.value,
+                ParserBackend.OCR_ONLY.value,
+                ParserBackend.MANUAL_RECOVERY.value,
+            ],
             route_reason="native_pdf",
             requires_ocr=False,
             scanned_pdf=False,
@@ -86,11 +114,21 @@ class ParserSelectionStrategy:
         )
 
     def _secondary_only_selection(self, *, reason: str) -> ParserSelection:
-        """Route non-primary formats to the secondary parser chain."""
+        """Route non-primary formats to the lightweight parser chain.
+
+        These formats do not benefit from the Docling PDF pipeline, so we use a
+        simpler fallback stack that keeps parsing deterministic and cheaper.
+        """
         return ParserSelection(
-            primary_parser_name="pymupdf",
-            parser_order=["pymupdf", "unstructured"],
-            fallback_chain=["unstructured", "manual_recovery"],
+            primary_parser_name=ParserBackend.PYMUPDF.value,
+            parser_order=[
+                ParserBackend.PYMUPDF.value,
+                ParserBackend.UNSTRUCTURED.value,
+            ],
+            fallback_chain=[
+                ParserBackend.UNSTRUCTURED.value,
+                ParserBackend.MANUAL_RECOVERY.value,
+            ],
             route_reason=reason,
             requires_ocr=False,
             scanned_pdf=False,
@@ -105,10 +143,22 @@ class ParserSelectionStrategy:
         scanned_pdf: bool = False,
     ) -> ParserSelection:
         """Route OCR-dependent documents to the OCR-first chain."""
+        # Docling still appears in the fallback chain because it can sometimes
+        # recover useful layout even after the explicit OCR path fails.
         return ParserSelection(
-            primary_parser_name="ocr_only",
-            parser_order=["ocr_only", "docling", "pymupdf", "unstructured"],
-            fallback_chain=["docling", "pymupdf", "unstructured", "manual_recovery"],
+            primary_parser_name=ParserBackend.OCR_ONLY.value,
+            parser_order=[
+                ParserBackend.OCR_ONLY.value,
+                ParserBackend.DOCLING.value,
+                ParserBackend.PYMUPDF.value,
+                ParserBackend.UNSTRUCTURED.value,
+            ],
+            fallback_chain=[
+                ParserBackend.DOCLING.value,
+                ParserBackend.PYMUPDF.value,
+                ParserBackend.UNSTRUCTURED.value,
+                ParserBackend.MANUAL_RECOVERY.value,
+            ],
             route_reason=reason,
             requires_ocr=True,
             scanned_pdf=scanned_pdf,
@@ -119,8 +169,8 @@ class ParserSelectionStrategy:
     def _manual_recovery_selection(self, *, reason: str) -> ParserSelection:
         """Route unparseable documents directly to manual recovery."""
         return ParserSelection(
-            primary_parser_name="manual_recovery",
-            parser_order=["manual_recovery"],
+            primary_parser_name=ParserBackend.MANUAL_RECOVERY.value,
+            parser_order=[ParserBackend.MANUAL_RECOVERY.value],
             fallback_chain=[],
             route_reason=reason,
             requires_ocr=False,
@@ -137,7 +187,8 @@ class ParserSelectionStrategy:
         page_count, total_chars, _image_pages = page_stats
         if page_count == 0:
             return False
-        return (total_chars / page_count) < self.config.scanned_pdf_min_chars_per_page
+        average_chars = total_chars / page_count
+        return average_chars < self.config.scanned_pdf_min_chars_per_page
 
     def _is_image_heavy(self, *, path: Path) -> bool:
         """Detect image-heavy PDFs using page-level image presence."""
@@ -147,6 +198,8 @@ class ParserSelectionStrategy:
         page_count, total_chars, image_pages = page_stats
         if page_count == 0:
             return False
+        # We require both a high image ratio and low text density so the OCR
+        # route does not steal native PDFs that merely contain a few charts.
         mostly_images = (image_pages / page_count) >= self.config.image_heavy_page_ratio
         sparse_text = (
             total_chars / page_count
@@ -154,7 +207,11 @@ class ParserSelectionStrategy:
         return mostly_images and sparse_text
 
     def _pdf_page_stats(self, *, path: Path) -> tuple[int, int, int] | None:
-        """Collect lightweight page statistics with PyMuPDF when available."""
+        """Collect lightweight page statistics with PyMuPDF when available.
+
+        The strategy degrades gracefully when PyMuPDF is unavailable. In that
+        case we simply skip the heuristic and fall back to default routing.
+        """
         try:
             import fitz
         except Exception:  # pragma: no cover

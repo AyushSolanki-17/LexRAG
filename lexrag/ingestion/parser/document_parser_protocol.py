@@ -1,4 +1,9 @@
-"""Runtime contract for ingestion-facing document parsers."""
+"""Runtime contract for ingestion-facing document parsers.
+
+The ingestion pipeline depends on behavior, not on the concrete orchestrator
+class. Keeping this protocol small makes it easy to substitute test doubles or
+future parser orchestrators without widening the integration surface.
+"""
 
 from __future__ import annotations
 

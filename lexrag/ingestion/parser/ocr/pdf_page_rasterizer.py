@@ -1,4 +1,8 @@
-"""Rasterize PDF pages into temporary images for OCR."""
+"""Rasterize PDF pages into temporary images for OCR.
+
+This utility converts PDFs into deterministic PNG page images so OCR can work
+with a consistent raster input regardless of the original PDF internals.
+"""
 
 from __future__ import annotations
 
@@ -25,6 +29,7 @@ class PdfPageRasterizer:
             )
 
     def _load_fitz(self):
+        """Import PyMuPDF only when rasterization is actually requested."""
         try:
             import fitz
         except Exception as exc:  # pragma: no cover
@@ -40,7 +45,10 @@ class PdfPageRasterizer:
         output_dir: Path,
         fitz_module: Any,
     ) -> list[RasterizedPage]:
+        """Render every page in order using one shared scaling matrix."""
         pages: list[RasterizedPage] = []
+        # PDF coordinates are defined at 72 DPI, so we scale relative to that
+        # base to reach the caller-configured OCR rasterization resolution.
         matrix = fitz_module.Matrix(self.dpi / 72.0, self.dpi / 72.0)
         for index, page in enumerate(document, start=1):
             pages.append(
@@ -61,6 +69,7 @@ class PdfPageRasterizer:
         output_dir: Path,
         matrix: Any,
     ) -> RasterizedPage:
+        """Render one page to a deterministic numbered PNG file."""
         pixmap = page.get_pixmap(matrix=matrix, alpha=False)
         image_path = output_dir / f"page_{page_number:04d}.png"
         pixmap.save(image_path)

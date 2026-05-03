@@ -1,16 +1,25 @@
-"""Factories for canonical parsed block creation."""
+"""Factories for canonical parsed block creation.
+
+This module is the compatibility layer between modern parser backends that
+already emit `ParsedBlock` and older code paths that still return lightweight
+dictionaries or ad-hoc objects.
+"""
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 from typing import Any
 
+from lexrag.ingestion.parser.builders import ParsedBlockBuilder
 from lexrag.ingestion.parser.schemas.parsed_block import ParsedBlock
 
 
 class ParsedBlockFactory:
     """Coerce legacy and backend-specific payloads into ``ParsedBlock``."""
+
+    def __init__(self, builder: ParsedBlockBuilder | None = None) -> None:
+        """Initialize the canonical block builder used for normalization."""
+        self.builder = builder or ParsedBlockBuilder()
 
     def build_blocks(
         self,
@@ -31,6 +40,8 @@ class ParsedBlockFactory:
         """
         normalized: list[ParsedBlock] = []
         for index, item in enumerate(parsed_items, start=1):
+            # Ordering is preserved because downstream chunking can use emitted
+            # order as a tie-breaker when multiple blocks share a page number.
             normalized.append(
                 self._coerce_item(
                     path=path,
@@ -54,6 +65,8 @@ class ParsedBlockFactory:
             return self._enrich_parsed_block(
                 path=path, parser_name=parser_name, item=item
             )
+        # Legacy backends often return dict payloads while older DTO-style
+        # adapters expose attributes. We normalize both into one payload shape.
         payload = item if isinstance(item, dict) else self._object_to_payload(item=item)
         return self._build_block_from_payload(
             path=path,
@@ -70,6 +83,8 @@ class ParsedBlockFactory:
         item: ParsedBlock,
     ) -> ParsedBlock:
         """Backfill required provenance fields on existing parsed blocks."""
+        # Existing ParsedBlock instances may already contain rich backend
+        # metadata, so we only fill missing identity/provenance fields.
         updates = {
             "doc_id": item.doc_id or path.stem,
             "source_path": item.source_path or str(path),
@@ -92,19 +107,13 @@ class ParsedBlockFactory:
         page = self._resolve_page(value=payload.get("page"), fallback=index)
         section = str(payload.get("section", f"Page {page}")).strip() or f"Page {page}"
         metadata = dict(payload.get("metadata", {}) or {})
-        return ParsedBlock(
-            doc_id=path.stem,
-            source_path=str(path),
-            source_name=path.name,
-            doc_type=path.suffix.lower().lstrip(".") or None,
-            block_id=self._build_block_id(path=path, page=page, order=index, text=text),
+        return self.builder.build(
+            path=path,
+            parser_name=parser_name,
             page=page,
             section=section,
-            block_type="paragraph",
             text=text,
-            markdown=text,
             order_in_page=index,
-            parser_used=parser_name,
             metadata=metadata,
         )
 
@@ -124,8 +133,3 @@ class ParsedBlockFactory:
         except (TypeError, ValueError):
             return max(fallback, 1)
         return page if page >= 1 else max(fallback, 1)
-
-    def _build_block_id(self, *, path: Path, page: int, order: int, text: str) -> str:
-        """Build deterministic block identifiers."""
-        digest = hashlib.sha1(text[:500].encode("utf-8")).hexdigest()[:12]
-        return f"{path.stem}_p{page}_b{order}_{digest}"

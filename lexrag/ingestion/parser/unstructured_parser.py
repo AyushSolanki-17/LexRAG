@@ -6,11 +6,20 @@ from pathlib import Path
 from typing import Any
 
 from lexrag.ingestion.parser.base_document_parser import BaseDocumentParser
+from lexrag.ingestion.parser.builders import ParsedBlockBuilder
 from lexrag.ingestion.parser.schemas.parsed_block import ParsedBlock
 
 
 class UnstructuredParser(BaseDocumentParser):
     """Broad-coverage parser used after higher-fidelity backends fail."""
+
+    def __init__(
+        self,
+        *,
+        block_builder: ParsedBlockBuilder | None = None,
+    ) -> None:
+        """Initialize shared dependencies for element normalization."""
+        self.block_builder = block_builder or ParsedBlockBuilder()
 
     def parse(self, path: Path) -> list[ParsedBlock]:
         """Parse a document with the optional ``unstructured`` dependency.
@@ -43,19 +52,13 @@ class UnstructuredParser(BaseDocumentParser):
             if not text:
                 continue
             blocks.append(
-                ParsedBlock(
-                    doc_id=path.stem,
-                    source_path=str(path),
-                    source_name=path.name,
-                    doc_type=path.suffix.lower().lstrip(".") or None,
-                    block_id=f"{path.stem}_p1_b{index}_unstructured",
+                self.block_builder.build(
+                    path=path,
+                    parser_name=self.parser_name,
                     page=1,
                     section=f"Element {index}",
-                    block_type="paragraph",
                     text=text,
-                    markdown=text,
                     order_in_page=index,
-                    parser_used=self.parser_name,
                     metadata={
                         "parser": self.parser_name,
                         "extraction_mode": "partition",
