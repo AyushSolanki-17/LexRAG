@@ -7,42 +7,64 @@ This package implements the architecture-defined file ingestion layers:
 
 The package is intentionally independent from parsing so callers can validate
 and classify uploads before any expensive parser dependency is invoked.
+
+Internal layout:
+
+- `antivirus/`: pluggable malware scanning implementations and factory
+- `classification/`: shared MIME, extension, and family classification helpers
+- `inspection/`: validation and type-detection orchestration
+- `loading/`: batch expansion and load failure mapping helpers
+- `validation/`: structured integrity and issue-building helpers
 """
 
 from __future__ import annotations
 
-from .build_antivirus_scanner import build_antivirus_scanner
-from .clamav_antivirus_scanner import ClamAVAntivirusScanner
-from .file_ingestion_gateway import FileIngestionGateway
-from .file_loader_pipeline import FileLoaderPipeline
+from .antivirus import (
+    ClamAVAntivirusScanner,
+    NoOpAntivirusScanner,
+    build_antivirus_scanner,
+)
+from .file_load_service import FileLoadService
 from .file_path_resolver import FilePathResolver
 from .file_type_detector import FileTypeDetector
 from .file_validation_service import FileValidationService
-from .no_op_antivirus_scanner import NoOpAntivirusScanner
+from .inspection.file_inspection_service import FileInspectionService
 from .schemas import (
+    AntivirusProvider,
     AntivirusScanResult,
+    FileIngestionAntivirusConfig,
     FileIngestionConfig,
+    FileIngestionLimits,
+    FileIngestionPathConfig,
     FileIngestionReport,
     FileLoadResult,
     FileTypeDetection,
+    FileTypeSelectionConfig,
     FileValidationIssue,
     FileValidationResult,
+    SupportedFileType,
 )
 
 __all__ = [
+    "AntivirusProvider",
     "AntivirusScanResult",
     "ClamAVAntivirusScanner",
+    "FileIngestionAntivirusConfig",
     "FileIngestionConfig",
-    "FileIngestionGateway",
+    "FileIngestionLimits",
+    "FileIngestionPathConfig",
     "FileIngestionReport",
+    "FileInspectionService",
     "FileLoadResult",
-    "FileLoaderPipeline",
+    "FileLoadService",
     "FilePathResolver",
     "FileTypeDetection",
     "FileTypeDetector",
+    "FileTypeSelectionConfig",
     "FileValidationIssue",
     "FileValidationResult",
     "FileValidationService",
     "NoOpAntivirusScanner",
+    "SupportedFileType",
     "build_antivirus_scanner",
 ]

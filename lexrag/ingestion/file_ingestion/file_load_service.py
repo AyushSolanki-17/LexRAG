@@ -1,11 +1,19 @@
-"""Production-facing file loader pipeline for pre-parse ingestion."""
+"""Resolve paths and build parser-ready file load results."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from lexrag.ingestion.file_ingestion.file_ingestion_gateway import FileIngestionGateway
 from lexrag.ingestion.file_ingestion.file_path_resolver import FilePathResolver
+from lexrag.ingestion.file_ingestion.inspection.file_inspection_service import (
+    FileInspectionService,
+)
+from lexrag.ingestion.file_ingestion.loading.batch_file_collector import (
+    BatchFileCollector,
+)
+from lexrag.ingestion.file_ingestion.loading.load_failure_reason_mapper import (
+    LoadFailureReasonMapper,
+)
 from lexrag.ingestion.file_ingestion.schemas.file_ingestion_config import (
     FileIngestionConfig,
 )
@@ -15,26 +23,48 @@ from lexrag.ingestion.file_ingestion.schemas.file_ingestion_report import (
 from lexrag.ingestion.file_ingestion.schemas.file_load_result import FileLoadResult
 
 
-class FileLoaderPipeline:
-    """Resolve, inspect, and approve files before parser execution."""
+class FileLoadService:
+    """Turn caller paths into structured parser-ready load decisions.
+
+    Main entrypoint for file ingestion:
+    resolve the path, inspect the file, and package the answer for the parser.
+    """
 
     def __init__(
         self,
         config: FileIngestionConfig | None = None,
         *,
-        gateway: FileIngestionGateway | None = None,
+        inspection_service: FileInspectionService | None = None,
         resolver: FilePathResolver | None = None,
     ) -> None:
+        """Wire together the loader collaborators.
+
+        Args:
+            config: Optional shared ingestion configuration.
+            inspection_service: Optional inspection service override.
+            resolver: Optional path resolver override.
+        """
         self.config = config or FileIngestionConfig()
-        self.gateway = gateway or FileIngestionGateway(config=self.config)
+        self.inspection_service = inspection_service or FileInspectionService(
+            config=self.config
+        )
         self.resolver = resolver or FilePathResolver(config=self.config)
+        self.batch_collector = BatchFileCollector(config=self.config)
+        self.failure_reason_mapper = LoadFailureReasonMapper()
 
     def load_file(self, path: str | Path) -> FileLoadResult:
-        """Load one file path into a parser-ready inspection result."""
+        """Load one file path into a parser-ready inspection result.
+
+        Args:
+            path: Caller-supplied file path.
+
+        Returns:
+            Structured load result for the resolved file.
+        """
         requested = str(path)
         resolved = self.resolver.resolve(path)
         self._assert_file(resolved)
-        report = self.gateway.inspect(resolved)
+        report = self.inspection_service.inspect(resolved)
         return self._build_result(
             requested_path=requested,
             resolved_path=resolved,
@@ -47,24 +77,21 @@ class FileLoaderPipeline:
         *,
         recursive: bool = False,
     ) -> list[FileLoadResult]:
-        """Expand a file or directory path into deterministic load results."""
+        """Expand a file or directory path into deterministic load results.
+
+        Args:
+            path: Caller-supplied file or directory path.
+            recursive: Whether directory expansion should recurse into children.
+
+        Returns:
+            Structured load results in deterministic order.
+        """
         requested = str(path)
         resolved = self.resolver.resolve(path)
         if resolved.is_file():
             return [self.load_file(resolved)]
-        candidates = self._collect_candidates(path=resolved, recursive=recursive)
+        candidates = self.batch_collector.collect(path=resolved, recursive=recursive)
         return self._load_candidates(requested_path=requested, candidates=candidates)
-
-    def _collect_candidates(self, *, path: Path, recursive: bool) -> list[Path]:
-        iterator = path.rglob("*") if recursive else path.iterdir()
-        candidates = sorted(
-            item for item in iterator if item.is_file() or item.is_symlink()
-        )
-        if not candidates:
-            raise FileNotFoundError(f"No files were found under path: {path}")
-        if len(candidates) > self.config.max_batch_files:
-            raise ValueError("batch_limit_exceeded")
-        return candidates
 
     def _load_candidates(
         self,
@@ -72,6 +99,15 @@ class FileLoaderPipeline:
         requested_path: str,
         candidates: list[Path],
     ) -> list[FileLoadResult]:
+        """Resolve a candidate list and preserve the original input ordering.
+
+        Args:
+            requested_path: Original caller-provided path string.
+            candidates: Concrete filesystem candidates to resolve and inspect.
+
+        Returns:
+            Load results aligned with the input candidate ordering.
+        """
         resolved_specs, failed = self._resolve_candidates(
             requested_path=requested_path,
             candidates=candidates,
@@ -79,7 +115,7 @@ class FileLoaderPipeline:
         resolved_files = [path for _index, path in resolved_specs]
         if not resolved_files:
             return [failed[index] for index in sorted(failed)]
-        reports = self.gateway.inspect_batch(resolved_files)
+        reports = self.inspection_service.inspect_batch(resolved_files)
         loaded = self._build_batch_results(
             requested_path=requested_path,
             files=resolved_files,
@@ -101,6 +137,15 @@ class FileLoaderPipeline:
         requested_path: str,
         candidates: list[Path],
     ) -> tuple[list[tuple[int, Path]], dict[int, FileLoadResult]]:
+        """Resolve individual batch entries while preserving per-item failures.
+
+        Args:
+            requested_path: Original caller-provided path string.
+            candidates: Concrete filesystem candidates to resolve.
+
+        Returns:
+            A pair of resolved file specifications and indexed failure results.
+        """
         resolved_files: list[tuple[int, Path]] = []
         failed: dict[int, FileLoadResult] = {}
         for index, candidate in enumerate(candidates):
@@ -110,7 +155,7 @@ class FileLoaderPipeline:
                 failed[index] = self._build_failed_result(
                     requested_path=requested_path,
                     candidate_path=candidate,
-                    reason=self._failure_reason(exc),
+                    reason=self.failure_reason_mapper.map(exc),
                     message=str(exc),
                 )
         return resolved_files, failed
@@ -122,6 +167,16 @@ class FileLoaderPipeline:
         files: list[Path],
         reports: list[FileIngestionReport],
     ) -> list[FileLoadResult]:
+        """Convert inspection reports into parser-ready batch results.
+
+        Args:
+            requested_path: Original caller-provided path string.
+            files: Resolved file paths that were inspected successfully.
+            reports: Inspection reports for the resolved files.
+
+        Returns:
+            Parser-ready load results for the inspected files.
+        """
         return [
             self._build_result(
                 requested_path=requested_path,
@@ -138,6 +193,16 @@ class FileLoaderPipeline:
         resolved_path: Path,
         report: FileIngestionReport,
     ) -> FileLoadResult:
+        """Package a successful inspection into the canonical result model.
+
+        Args:
+            requested_path: Original caller-provided path string.
+            resolved_path: Canonical resolved path to the file.
+            report: Inspection report for the resolved file.
+
+        Returns:
+            Successful parser-ready load result.
+        """
         validation = report.validation
         return FileLoadResult(
             requested_path=requested_path,
@@ -155,6 +220,17 @@ class FileLoaderPipeline:
         reason: str,
         message: str,
     ) -> FileLoadResult:
+        """Package a pre-inspection failure into the canonical result model.
+
+        Args:
+            requested_path: Original caller-provided path string.
+            candidate_path: Candidate path that failed before inspection.
+            reason: Stable rejection reason code.
+            message: Human-readable failure detail.
+
+        Returns:
+            Failed parser-ready load result.
+        """
         return FileLoadResult(
             requested_path=requested_path,
             resolved_path=str(candidate_path),
@@ -165,18 +241,11 @@ class FileLoaderPipeline:
         )
 
     def _assert_file(self, path: Path) -> None:
+        """Ensure the resolved single-path target is a file.
+
+        Args:
+            path: Resolved path to validate.
+        """
         if path.is_file():
             return
         raise FileNotFoundError(f"Document is not a file: {path}")
-
-    def _failure_reason(self, exc: Exception) -> str:
-        message = str(exc).lower()
-        if "symlinked" in message:
-            return "symlink_not_allowed"
-        if "outside the configured roots" in message:
-            return "outside_allowed_roots"
-        if "does not exist" in message:
-            return "file_not_found"
-        if "not a file" in message:
-            return "not_a_file"
-        return exc.__class__.__name__

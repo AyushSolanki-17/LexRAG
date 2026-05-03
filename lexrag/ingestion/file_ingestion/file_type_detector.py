@@ -10,6 +10,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from lexrag.ingestion.file_ingestion.classification.document_family_classifier import (
+    DocumentFamilyClassifier,
+)
+from lexrag.ingestion.file_ingestion.classification.extension_media_type_policy import (
+    ExtensionMediaTypePolicy,
+)
+from lexrag.ingestion.file_ingestion.classification.text_sample_inspector import (
+    TextSampleInspector,
+)
 from lexrag.ingestion.file_ingestion.magic_bytes_sniffer import MagicBytesSniffer
 from lexrag.ingestion.file_ingestion.schemas.file_ingestion_config import (
     FileIngestionConfig,
@@ -38,6 +47,9 @@ class FileTypeDetector:
         """
         self.config = config or FileIngestionConfig()
         self.sniffer = sniffer or MagicBytesSniffer(config=self.config)
+        self.family_classifier = DocumentFamilyClassifier(config=self.config)
+        self.media_type_policy = ExtensionMediaTypePolicy(config=self.config)
+        self.text_inspector = TextSampleInspector()
 
     def detect(self, path: Path) -> FileTypeDetection:
         """Detect the file family from content and extension.
@@ -51,22 +63,20 @@ class FileTypeDetector:
         sample = path.read_bytes()[: self.config.magic_byte_window]
         media_type, detection_method = self.sniffer.sniff(path)
         extension = path.suffix.lower()
+        document_family = self.family_classifier.classify(
+            extension=extension,
+            media_type=media_type,
+        )
         return FileTypeDetection(
             extension=extension,
             media_type=media_type,
             detection_method=detection_method,
-            document_family=self._document_family(
-                extension=extension,
-                media_type=media_type,
-            ),
-            detected_type=self._document_family(
-                extension=extension,
-                media_type=media_type,
-            ),
+            document_family=document_family,
+            detected_type=document_family,
             has_pdf_header=sample.startswith(b"%PDF"),
             is_html=any(marker in sample.lower() for marker in HTML_MARKERS),
-            is_text_like=self._is_likely_text(sample=sample),
-            extension_matches_media_type=self._extension_matches_media_type(
+            is_text_like=self.text_inspector.is_likely_text(sample=sample),
+            extension_matches_media_type=self.media_type_policy.matches(
                 extension=extension,
                 media_type=media_type,
             ),
@@ -74,40 +84,3 @@ class FileTypeDetector:
             is_email=extension in self.config.email_extensions
             or media_type == "message/rfc822",
         )
-
-    def _document_family(self, *, extension: str, media_type: str) -> str:
-        """Collapse low-level media types into parser-friendly families."""
-        if media_type == "application/pdf":
-            return "pdf"
-        if media_type.startswith("image/") or extension in self.config.image_extensions:
-            return "image"
-        if media_type.startswith("application/vnd.openxmlformats-officedocument."):
-            return "office"
-        if media_type == "text/html":
-            return "html"
-        if media_type == "application/xml":
-            return "xml"
-        if media_type == "message/rfc822" or extension in self.config.email_extensions:
-            return "email"
-        if extension in self.config.office_extensions:
-            return "office"
-        if media_type.startswith("text/"):
-            return "text"
-        return extension.lstrip(".") or "unknown"
-
-    def _extension_matches_media_type(self, *, extension: str, media_type: str) -> bool:
-        """Cross-validate extension and byte-level media detection."""
-        allowed_media_types = self.config.extension_media_type_map.get(extension)
-        if allowed_media_types is None:
-            return False
-        return media_type in allowed_media_types
-
-    def _is_likely_text(self, *, sample: bytes) -> bool:
-        """Heuristically identify text-like payloads for secondary routing."""
-        if not sample or b"\x00" in sample:
-            return False
-        try:
-            sample.decode("utf-8")
-        except UnicodeDecodeError:
-            return False
-        return True

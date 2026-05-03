@@ -16,6 +16,11 @@ class FileValidationResult(BaseModel):
     path: str = Field(description="Resolved file path as a string for audit logging.")
     extension: str = Field(description="Normalized file extension.")
     file_size_bytes: int = Field(ge=0, description="Document size in bytes.")
+    page_count: int | None = Field(
+        default=None,
+        ge=0,
+        description="Detected page count for paged formats when available.",
+    )
     media_type: str = Field(description="Detected MIME-like content type.")
     sha256: str = Field(
         description="Stable file hash used for deduplication and audits."

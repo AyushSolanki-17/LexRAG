@@ -16,24 +16,36 @@ canonical file report the parser layer should trust.
 
 ## Main objects
 
+- `FileLoadService`: the main entrypoint for callers that start with a path
+- `FileInspectionService`: validation + type detection for already-resolved files
 - `FilePathResolver`: canonical path resolution and path-boundary checks
 - `FileValidationService`: size, extension, corruption, encryption, antivirus,
   and batch-duplicate checks
 - `ClamAVAntivirusScanner`: optional open-source malware scanning via ClamAV
 - `FileTypeDetector`: byte-level classification into parser-facing families
-- `FileIngestionGateway`: combines validation and detection for one file
-- `FileLoaderPipeline`: resolves a file or directory path and returns
-  parser-ready `FileLoadResult` objects
+
+## Internal structure
+
+- `antivirus/`: scanner interface, ClamAV integration, and scanner factory
+- `classification/`: shared extension policy, document family routing, and
+  text-sample heuristics
+- `inspection/`: orchestrates validation and type detection
+- `validation/`: lightweight integrity inspection and structured issue creation
+- `loading/`: deterministic directory expansion and stable load failure mapping
+
+The top-level modules remain the public API so downstream packages do not need
+to know about the internal organization.
 
 ## Expected flow
 
 ```text
 caller path
-  -> FilePathResolver
-  -> FileIngestionGateway
-      -> FileValidationService
-          -> ClamAVAntivirusScanner | NoOpAntivirusScanner
-      -> FileTypeDetector
+  -> FileLoadService
+      -> FilePathResolver
+      -> FileInspectionService
+          -> FileValidationService
+              -> antivirus/*
+          -> FileTypeDetector
   -> FileLoadResult
   -> parser selection
 ```
@@ -43,9 +55,22 @@ caller path
 ```python
 from pathlib import Path
 
-from lexrag.ingestion.file_ingestion import FileLoaderPipeline
+from lexrag.ingestion.file_ingestion import (
+    FileIngestionAntivirusConfig,
+    FileIngestionConfig,
+    FileLoadService,
+    SupportedFileType,
+)
 
-loader = FileLoaderPipeline()
+config = FileIngestionConfig.from_options(
+    allowed_file_types=(SupportedFileType.PDF, SupportedFileType.DOCX),
+    max_file_size_mb=25,
+    max_page_count=200,
+    antivirus=FileIngestionAntivirusConfig.clamav(
+        socket_path="/var/run/clamd.sock"
+    ),
+)
+loader = FileLoadService(config=config)
 result = loader.load_file(Path("/data/contracts/master-service-agreement.pdf"))
 
 if result.is_ready:

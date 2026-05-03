@@ -10,6 +10,9 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
+from lexrag.ingestion.file_ingestion.classification.text_sample_inspector import (
+    TextSampleInspector,
+)
 from lexrag.ingestion.file_ingestion.schemas.file_ingestion_config import (
     FileIngestionConfig,
 )
@@ -29,6 +32,7 @@ class MagicBytesSniffer:
             config: Optional ingestion configuration.
         """
         self.config = config or FileIngestionConfig()
+        self.text_inspector = TextSampleInspector()
 
     def sniff(self, path: Path) -> tuple[str, str]:
         """Return the best-effort media type and its detection source.
@@ -50,7 +54,14 @@ class MagicBytesSniffer:
         )
 
     def _sniff_with_python_magic(self, *, sample: bytes) -> str | None:
-        """Use libmagic when present because it is the highest-fidelity option."""
+        """Use libmagic when present because it is the highest-fidelity option.
+
+        Args:
+            sample: Leading byte sample from the file.
+
+        Returns:
+            Detected media type when `python-magic` succeeds.
+        """
         try:
             import magic
         except Exception:
@@ -70,7 +81,16 @@ class MagicBytesSniffer:
         sample: bytes,
         extension: str,
     ) -> tuple[str, str]:
-        """Apply conservative fallback signatures when libmagic is unavailable."""
+        """Apply conservative fallback signatures when libmagic is unavailable.
+
+        Args:
+            path: File path being inspected.
+            sample: Leading byte sample from the file.
+            extension: Lowercase filename extension.
+
+        Returns:
+            Pair of `(media_type, detection_method)`.
+        """
         lowered = sample.lower()
         if sample.startswith(b"%PDF"):
             return "application/pdf", "signature"
@@ -88,12 +108,20 @@ class MagicBytesSniffer:
             return "application/xml", "heuristic"
         if any(marker in lowered for marker in EML_MARKERS):
             return "message/rfc822", "heuristic"
-        if self._is_likely_text(sample=sample):
+        if self.text_inspector.is_likely_text(sample=sample):
             return "text/plain", "heuristic"
         return "application/octet-stream", "unknown"
 
     def _sniff_zip_container(self, *, path: Path, extension: str) -> tuple[str, str]:
-        """Inspect ZIP-based containers to identify concrete OOXML document types."""
+        """Inspect ZIP-based containers to identify concrete OOXML document types.
+
+        Args:
+            path: File path being inspected.
+            extension: Lowercase filename extension.
+
+        Returns:
+            Pair of `(media_type, detection_method)`.
+        """
         try:
             with zipfile.ZipFile(path) as archive:
                 names = set(archive.namelist())
@@ -114,7 +142,14 @@ class MagicBytesSniffer:
         return "application/zip", "signature"
 
     def _office_media_type_for_extension(self, *, extension: str) -> str:
-        """Map configured OOXML extensions onto canonical media types."""
+        """Map configured OOXML extensions onto canonical media types.
+
+        Args:
+            extension: Lowercase filename extension.
+
+        Returns:
+            Canonical OOXML media type for the extension.
+        """
         if extension == ".docx":
             return self._docx_media_type()
         if extension == ".xlsx":
@@ -124,22 +159,27 @@ class MagicBytesSniffer:
         return "application/zip"
 
     def _docx_media_type(self) -> str:
+        """Return the canonical DOCX media type.
+
+        Returns:
+            Canonical DOCX media type string.
+        """
         return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
     def _xlsx_media_type(self) -> str:
+        """Return the canonical XLSX media type.
+
+        Returns:
+            Canonical XLSX media type string.
+        """
         return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
     def _pptx_media_type(self) -> str:
+        """Return the canonical PPTX media type.
+
+        Returns:
+            Canonical PPTX media type string.
+        """
         return (
             "application/vnd.openxmlformats-officedocument.presentationml.presentation"
         )
-
-    def _is_likely_text(self, *, sample: bytes) -> bool:
-        """Identify UTF-safe text payloads without being overly optimistic."""
-        if not sample or b"\x00" in sample:
-            return False
-        try:
-            sample.decode("utf-8")
-        except UnicodeDecodeError:
-            return False
-        return True
